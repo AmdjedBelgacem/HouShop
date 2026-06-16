@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HouPhone Shop</title>
+    <style>
+      #splash {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: #F8F9FB;
+        z-index: 9999;
+        transition: opacity 0.4s ease, visibility 0.4s ease;
+      }
+      html.dark #splash {
+        background: #0B1120;
+      }
+      #splash.fade-out {
+        opacity: 0;
+        visibility: hidden;
+      }
+      #splash img {
+        width: 72px;
+        height: 72px;
+        object-fit: contain;
+        animation: pulse-logo 1.8s ease-in-out infinite;
+      }
+      #splash .brand {
+        margin-top: 16px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 18px;
+        font-weight: 700;
+        color: #1E293B;
+        letter-spacing: -0.02em;
+      }
+      html.dark #splash .brand {
+        color: #E8ECF2;
+      }
+      #splash .subtitle {
+        margin-top: 4px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 11px;
+        font-weight: 500;
+        color: #9CA3AF;
+        letter-spacing: 0.04em;
+      }
+      html.dark #splash .subtitle {
+        color: #4B5C6E;
+      }
+      #splash .loader {
+        margin-top: 28px;
+        width: 32px;
+        height: 3px;
+        border-radius: 3px;
+        background: #E5E7EB;
+        overflow: hidden;
+        position: relative;
+      }
+      html.dark #splash .loader {
+        background: #1F2937;
+      }
+      #splash .loader::after {
+        content: '';
+        position: absolute;
+        left: -40%;
+        top: 0;
+        width: 40%;
+        height: 100%;
+        border-radius: 3px;
+        background: #1E293B;
+        animation: loader-slide 1.2s ease-in-out infinite;
+      }
+      html.dark #splash .loader::after {
+        background: #60A5FA;
+      }
+      @keyframes pulse-logo {
+        0%, 100% { transform: scale(1); opacity: 1; }
+        50% { transform: scale(1.06); opacity: 0.8; }
+      }
+      @keyframes loader-slide {
+        0% { left: -40%; }
+        100% { left: 100%; }
+      }
+    </style>
+    <script>
+      if (localStorage.getItem('shop_theme') === 'dark') {
+        document.documentElement.classList.add('dark');
+      }
+    </script>
+  </head>
+  <body>
+    <div id="splash">
+      <img src="/logo.png" alt="HouPhone Shop" />
+      <div class="brand">HouPhone Shop</div>
+      <div class="subtitle">MANAGEMENT SUITE</div>
+      <div class="loader"></div>
+    </div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

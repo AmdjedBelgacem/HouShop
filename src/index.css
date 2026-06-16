@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --color-navy: #1E293B;
+  --color-navy-light: #334155;
+  --color-sidebar: #F8F9FA;
+  --color-surface: #F8F9FA;
+  --color-card: #FFFFFF;
+  --color-border: #E5E7EB;
+  --color-border-light: #F1F5F9;
+  --color-text-primary: #1F2937;
+  --color-text-secondary: #6B7280;
+  --color-text-muted: #9CA3AF;
+  --color-accent-blue: #3B82F6;
+  --color-accent-red: #EF4444;
+  --color-accent-green: #22C55E;
+  --color-chart-navy: #1E293B;
+  --color-chart-gray: #6B7280;
+  --color-chart-light: #D1D5DB;
+  --color-donut-bg: #F1F5F9;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  @apply bg-surface text-text-primary antialiased;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #9CA3AF; }
+
+.dark {
+  --color-navy: #3B82F6;
+  --color-navy-light: #60A5FA;
+  --color-sidebar: #141B2D;
+  --color-surface: #0B1120;
+  --color-card: #141B2D;
+  --color-border: #1F2937;
+  --color-border-light: #151D2E;
+  --color-text-primary: #E8ECF2;
+  --color-text-secondary: #7B8794;
+  --color-text-muted: #4B5C6E;
+  --color-accent-blue: #60A5FA;
+  --color-accent-green: #4ADE80;
+  --color-chart-navy: #60A5FA;
+  --color-chart-gray: #6B7A8C;
+  --color-chart-light: #2A3548;
+  --color-donut-bg: #1F2937;
+}
+
+.dark ::-webkit-scrollbar-thumb { background: #2A3548; }
+.dark ::-webkit-scrollbar-thumb:hover { background: #3B4A5E; }
+
+.card {
+  @apply bg-card rounded-xl border border-border;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02);
+}
+.dark .card {
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2), 0 1px 2px rgba(0,0,0,0.15);
+}
+
+.form-input {
+  @apply w-full px-3 py-2 rounded-lg border border-border text-[13px] text-text-primary
+         focus:outline-none focus:ring-2 focus:ring-navy/15 focus:border-navy/30
+         placeholder:text-text-muted bg-card transition-colors;
+}
