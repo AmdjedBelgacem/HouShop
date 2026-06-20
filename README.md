@@ -52,3 +52,12 @@ src-tauri/migrations  → SQLite schema migrations
 ```
 
 That's pretty much it. It's a monolith, everything in one repo, one binary, one database file. Simple to back up, simple to move to another machine.
+
+## Releasing updates
+
+When you want to ship a new version:
+
+1. Bump the version in `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and `src/hooks/useUpdateCheck.ts`
+2. Tag it: `git tag v1.1.0 && git push --tags`
+3. GitHub Actions builds the Windows installer and creates a Release automatically
+4. Existing installs detect the new version on next launch and show an update banner

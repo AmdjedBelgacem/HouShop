@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useI18n } from '../i18n';
 import logoImg from '../assets/logo.png';
+import UpdateBanner from './UpdateBanner';
 import {
   LayoutGrid, ClipboardList, Clock, Users, ShoppingCart, Plus,
   HelpCircle, LogOut, CalendarCheck,
@@ -102,6 +103,7 @@ export default function Layout({ children, currentPage, onNavigate }: LayoutProp
       </aside>
       {}
       <main className="flex-1 overflow-y-auto ml-[260px]">
+        <UpdateBanner />
         {children}
       </main>
     </div>

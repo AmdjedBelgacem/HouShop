@@ -496,6 +496,9 @@ export const translations: Record<'en' | 'ar' | 'fr', TranslationDict> = {
     'logs.tryAdjusting': 'Try adjusting your filters.',
     'logs.type': 'Type',
     'logs.details': 'Details',
+    'update.available': 'HouShop {version} is available',
+    'update.download': 'Download',
+    'update.dismiss': 'Dismiss',
   },
   ar: {
     'common.save': 'حفظ',
@@ -993,6 +996,9 @@ export const translations: Record<'en' | 'ar' | 'fr', TranslationDict> = {
     'logs.tryAdjusting': 'حاول تعديل عوامل التصفية.',
     'logs.type': 'النوع',
     'logs.details': 'التفاصيل',
+    'update.available': 'HouShop {version} متاح الآن',
+    'update.download': 'تحميل',
+    'update.dismiss': 'إغلاق',
   },
   fr: {
     'common.save': 'Enregistrer',
@@ -1490,5 +1496,8 @@ export const translations: Record<'en' | 'ar' | 'fr', TranslationDict> = {
     'logs.tryAdjusting': 'Essayez de modifier vos filtres.',
     'logs.type': 'Type',
     'logs.details': 'Détails',
+    'update.available': 'HouShop {version} est disponible',
+    'update.download': 'Télécharger',
+    'update.dismiss': 'Fermer',
   },
 };
