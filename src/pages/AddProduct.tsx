@@ -54,10 +54,18 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
   const [showBarcodeModal, setShowBarcodeModal] = useState(false);
   const barcodeSvgRef = useRef<SVGSVGElement>(null);
 
-  function generateBarcodeValue(name: string): string {
-    const prefix = name.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4).padEnd(2, 'X');
-    const rand = Math.random().toString(36).substring(2, 6).toUpperCase();
-    return `${prefix}-${rand}`;
+  function generateBarcodeValue(_name: string): string {
+    const digits: number[] = [];
+    for (let i = 0; i < 12; i++) {
+      digits.push(Math.floor(Math.random() * 10));
+    }
+    let sum = 0;
+    for (let i = 0; i < 12; i++) {
+      sum += digits[i] * (i % 2 === 0 ? 1 : 3);
+    }
+    const check = (10 - (sum % 10)) % 10;
+    digits.push(check);
+    return digits.join('');
   }
 
   function generateSkuValue(name: string): string {
@@ -308,7 +316,7 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
                 <div className="flex items-center gap-2">
                   <input type="text" value={form.barcode}
                     onChange={(e) => setForm(f => ({ ...f, barcode: e.target.value }))}
-                    className="form-input flex-1" placeholder="e.g. IPHO-A3X7" />
+                    className="form-input flex-1 font-mono" placeholder="e.g. 6291041500213" />
                   <button type="button" onClick={() => setForm(f => ({ ...f, barcode: generateBarcodeValue(f.name) }))}
                     className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-[12px] font-medium text-text-secondary hover:bg-surface transition-colors flex-shrink-0">
                     <RefreshCw size={13} /> {t('barcode.generate')}

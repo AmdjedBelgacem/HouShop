@@ -16,9 +16,9 @@ interface BarcodePrintModalProps {
 const fmt = (n: number) =>
   `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DA`;
 
-const SIZES: Record<PaperSize, { w: number; h: number; label: string; nameFont: string; skuFont: string; priceFont: string; barWidth: number; barHeight: number; barFont: number; showBarText: boolean; padding: string }> = {
-  medium: { w: 45, h: 35, label: '35×45mm', nameFont: '10px', skuFont: '7px', priceFont: '11px', barWidth: 1.5, barHeight: 38, barFont: 10, showBarText: true, padding: '2mm' },
-  small:  { w: 40, h: 20, label: '20×40mm', nameFont: '7px', skuFont: '5.5px', priceFont: '8px', barWidth: 1, barHeight: 22, barFont: 7, showBarText: false, padding: '1mm' },
+const SIZES: Record<PaperSize, { w: number; h: number; printW: number; printH: number; label: string; nameFont: string; skuFont: string; priceFont: string; barWidth: number; barHeight: number; barFont: number; showBarText: boolean }> = {
+  medium: { w: 45, h: 35, printW: 42, printH: 33, label: '35×45mm', nameFont: '9px', skuFont: '6.5px', priceFont: '10px', barWidth: 1.1, barHeight: 28, barFont: 8, showBarText: true },
+  small:  { w: 40, h: 20, printW: 37, printH: 18, label: '20×40mm', nameFont: '6.5px', skuFont: '5px', priceFont: '7px', barWidth: 0.9, barHeight: 14, barFont: 6, showBarText: false },
 };
 
 export default function BarcodePrintModal({ barcode, productName, sku, price, onClose }: BarcodePrintModalProps) {
@@ -31,12 +31,12 @@ export default function BarcodePrintModal({ barcode, productName, sku, price, on
     if (svgRef.current && barcode) {
       try {
         JsBarcode(svgRef.current, barcode, {
-          format: 'CODE128',
+          format: 'EAN13',
           width: s.barWidth,
           height: s.barHeight,
           displayValue: s.showBarText,
           fontSize: s.barFont,
-          margin: 1,
+          margin: 0,
           background: '#ffffff',
           lineColor: '#000000',
         });
@@ -52,23 +52,31 @@ export default function BarcodePrintModal({ barcode, productName, sku, price, on
           margin: 0;
         }
         @media print {
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
           html, body {
+            width: ${s.w}mm !important;
+            height: ${s.h}mm !important;
             margin: 0 !important;
             padding: 0 !important;
+            overflow: hidden !important;
           }
           body * { visibility: hidden !important; }
           .barcode-print-area, .barcode-print-area * { visibility: visible !important; }
           .barcode-print-area {
-            position: absolute !important;
-            left: 0 !important; top: 0 !important;
-            width: ${s.w}mm !important;
-            height: ${s.h}mm !important;
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            justify-content: center !important;
+            position: fixed !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: ${s.printW}mm !important;
+            height: ${s.printH}mm !important;
+            margin: 1mm !important;
             background: white !important;
             color: #000 !important;
-            padding: ${s.padding} !important;
             text-align: center !important;
             overflow: hidden !important;
-            box-sizing: border-box !important;
           }
           .barcode-no-print { display: none !important; }
         }
@@ -101,14 +109,14 @@ export default function BarcodePrintModal({ barcode, productName, sku, price, on
           </div>
         </div>
 
-        <div className="barcode-print-area px-4 py-3">
-          <p style={{ fontSize: s.nameFont, fontWeight: 900, lineHeight: 1.1 }} className="text-text-primary">{productName}</p>
-          {sku && <p style={{ fontSize: s.skuFont, marginTop: '0.5mm' }} className="text-text-muted">SKU: {sku}</p>}
+        <div className="barcode-print-area">
+          <p style={{ fontSize: s.nameFont, fontWeight: 900, lineHeight: 1.1, margin: 0 }} className="text-text-primary">{productName}</p>
+          {sku && <p style={{ fontSize: s.skuFont, margin: '0.3mm 0 0 0' }} className="text-text-muted">SKU: {sku}</p>}
           {price != null && price > 0 && (
-            <p style={{ fontSize: s.priceFont, fontWeight: 900, marginTop: '0.5mm' }} className="text-navy">{fmt(price)}</p>
+            <p style={{ fontSize: s.priceFont, fontWeight: 900, margin: '0.3mm 0 0 0' }} className="text-navy">{fmt(price)}</p>
           )}
-          <div className="flex justify-center mt-1">
-            <svg ref={svgRef} style={{ maxWidth: `${s.w - 4}mm` }} />
+          <div style={{ marginTop: '0.5mm' }}>
+            <svg ref={svgRef} style={{ maxWidth: `${s.printW - 2}mm`, display: 'block' }} />
           </div>
         </div>
       </div>
