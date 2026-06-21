@@ -15,7 +15,8 @@ import Profile from './pages/Profile';
 import Reservations from './pages/Reservations';
 import Logs from './pages/Logs';
 import type { Product, CustomerWithStats } from './lib/types';
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
+import { useBarcodeScanner } from './hooks/useBarcodeScanner';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -30,6 +31,15 @@ function AppContent() {
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [editingCustomer, setEditingCustomer] = useState<CustomerWithStats | null>(null);
+  const [scannedProduct, setScannedProduct] = useState<Product | null>(null);
+
+  const handleScan = useCallback((product: Product) => {
+    setScannedProduct(product);
+    setCurrentPage('pos');
+  }, []);
+
+  useBarcodeScanner(handleScan);
+
   if (!isAuthenticated) {
     return <Login />;
   }
@@ -44,7 +54,7 @@ function AppContent() {
       case 'add-customer': return <AddCustomer onBack={() => setCurrentPage('customers')} />;
       case 'edit-customer': return <AddCustomer onBack={() => setCurrentPage('customers')} editCustomer={editingCustomer} />;
       case 'reservations': return <Reservations />;
-      case 'pos': return <Checkout />;
+      case 'pos': return <Checkout scannedProduct={scannedProduct} onScanHandled={() => setScannedProduct(null)} />;
       case 'profile': return <Profile />;
       case 'logs': return <Logs onBack={() => setCurrentPage('dashboard')} />;
       default: return <Dashboard onNavigate={(p) => setCurrentPage(p as Page)} />;

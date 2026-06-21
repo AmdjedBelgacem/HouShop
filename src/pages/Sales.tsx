@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import type { SaleWithItems, SalesSummary, Customer } from '../lib/types';
 import Invoice from '../components/Invoice';
+import ShippingLabel from '../components/ShippingLabel';
 import CustomSelect from '../components/CustomSelect';
 import { useI18n } from '../i18n';
 import {
@@ -56,6 +57,7 @@ export default function Sales() {
   const [deleteMode, setDeleteMode] = useState(false);
   const [menuOpenId, setMenuOpenId] = useState<number | null>(null);
   const [invoiceSale, setInvoiceSale] = useState<SaleWithItems | null>(null);
+  const [shippingSale, setShippingSale] = useState<SaleWithItems | null>(null);
   const deleteMutation = useMutation({
     mutationFn: (id: number) => invoke('delete_sale', { id }),
     onSuccess: () => {
@@ -322,6 +324,13 @@ export default function Sales() {
                                       {t('checkout.printInvoice')}
                                     </button>
                                     <button
+                                      onClick={(e) => { e.stopPropagation(); setShippingSale(s); setMenuOpenId(null); }}
+                                      className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-text-primary hover:bg-surface transition-colors text-left"
+                                    >
+                                      <Printer size={14} className="text-text-muted" />
+                                      {t('shipping.printLabel')}
+                                    </button>
+                                    <button
                                       onClick={(e) => { e.stopPropagation(); handleDeleteSale(s.sale.id); setMenuOpenId(null); }}
                                       className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-accent-red hover:bg-red-50 transition-colors text-left"
                                     >
@@ -443,6 +452,15 @@ export default function Sales() {
           items={invoiceSale.items}
           customer={invoiceSale.sale.customer_id ? customerMap.get(invoiceSale.sale.customer_id) ?? null : null}
           onClose={() => setInvoiceSale(null)}
+        />
+      )}
+
+      {shippingSale && (
+        <ShippingLabel
+          sale={shippingSale.sale}
+          items={shippingSale.items}
+          customer={shippingSale.sale.customer_id ? customerMap.get(shippingSale.sale.customer_id) ?? null : null}
+          onClose={() => setShippingSale(null)}
         />
       )}
     </div>

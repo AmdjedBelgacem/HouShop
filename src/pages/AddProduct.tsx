@@ -1,12 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
 import type { Category, CreateProduct, Product, UpdateProduct, ProductVariant, CreateVariant } from '../lib/types';
 import CustomSelect from '../components/CustomSelect';
+import BarcodePrintModal from '../components/BarcodePrintModal';
+import JsBarcode from 'jsbarcode';
 import {
   ArrowLeft, ImagePlus, Cloud, X, Plus, Eye, Info, DollarSign,
-  BarChart3, Layers, Trash2, ChevronDown, ChevronUp, Star,
+  BarChart3, Layers, Trash2, ChevronDown, ChevronUp, Star, RefreshCw,
 } from 'lucide-react';
 interface AddProductProps {
   onBack: () => void;
@@ -49,6 +51,36 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
   const [showTagInput, setShowTagInput] = useState(false);
   const [hasVariants, setHasVariants] = useState(false);
   const [variants, setVariants] = useState<(CreateVariant & { _expanded?: boolean })[]>([]);
+  const [showBarcodeModal, setShowBarcodeModal] = useState(false);
+  const barcodeSvgRef = useRef<SVGSVGElement>(null);
+
+  function generateBarcodeValue(name: string): string {
+    const prefix = name.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4).padEnd(2, 'X');
+    const rand = Math.random().toString(36).substring(2, 6).toUpperCase();
+    return `${prefix}-${rand}`;
+  }
+
+  function generateSkuValue(name: string): string {
+    const words = name.trim().split(/\s+/).filter(Boolean);
+    const abbr = words.map(w => {
+      const clean = w.toUpperCase().replace(/[^A-Z0-9]/g, '');
+      if (clean.length <= 3) return clean;
+      return clean.slice(0, 2) + clean.slice(-1);
+    }).join('-');
+    const num = String(Math.floor(Math.random() * 900) + 100);
+    return `HPS-${abbr || 'ITEM'}-${num}`;
+  }
+
+  useEffect(() => {
+    if (barcodeSvgRef.current && form.barcode) {
+      try {
+        JsBarcode(barcodeSvgRef.current, form.barcode, {
+          format: 'CODE128', width: 1.5, height: 40, displayValue: true,
+          fontSize: 12, margin: 2, background: 'transparent', lineColor: 'currentColor',
+        });
+      } catch { }
+    }
+  }, [form.barcode]);
   const { data: categories } = useQuery({
     queryKey: ['categories'],
     queryFn: () => invoke<Category[]>('get_categories'),
@@ -123,7 +155,11 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
         }
         queryClient.invalidateQueries({ queryKey: ['product-variants'] });
       }
-      onBack();
+      if (!isEditing && form.barcode) {
+        setShowBarcodeModal(true);
+      } else {
+        onBack();
+      }
     } catch (err) {
       console.error('Failed to save product:', err);
     }
@@ -258,9 +294,31 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
                   className="form-input" placeholder={t('addProduct.productNamePlaceholder')} />
               </Field>
               <Field label={t('addProduct.skuLabel')}>
-                <input type="text" value={form.sku}
-                  onChange={(e) => setForm(f => ({ ...f, sku: e.target.value }))}
-                  className="form-input" placeholder={t('addProduct.skuPlaceholder')} />
+                <div className="flex items-center gap-2">
+                  <input type="text" value={form.sku}
+                    onChange={(e) => setForm(f => ({ ...f, sku: e.target.value }))}
+                    className="form-input flex-1" placeholder={t('addProduct.skuPlaceholder')} />
+                  <button type="button" onClick={() => setForm(f => ({ ...f, sku: generateSkuValue(f.name) }))}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-[12px] font-medium text-text-secondary hover:bg-surface transition-colors flex-shrink-0">
+                    <RefreshCw size={13} /> {t('barcode.generate')}
+                  </button>
+                </div>
+              </Field>
+              <Field label={t('barcode.label')}>
+                <div className="flex items-center gap-2">
+                  <input type="text" value={form.barcode}
+                    onChange={(e) => setForm(f => ({ ...f, barcode: e.target.value }))}
+                    className="form-input flex-1" placeholder="e.g. IPHO-A3X7" />
+                  <button type="button" onClick={() => setForm(f => ({ ...f, barcode: generateBarcodeValue(f.name) }))}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-[12px] font-medium text-text-secondary hover:bg-surface transition-colors flex-shrink-0">
+                    <RefreshCw size={13} /> {t('barcode.generate')}
+                  </button>
+                </div>
+                {form.barcode && (
+                  <div className="mt-2 flex justify-center p-2 rounded-lg bg-surface border border-border">
+                    <svg ref={barcodeSvgRef} className="h-10" />
+                  </div>
+                )}
               </Field>
               <Field label={t('addProduct.categoryLabel')}>
                 <CustomSelect
@@ -509,6 +567,16 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
           </section>
         </div>
       </div>
+
+      {showBarcodeModal && form.barcode && (
+        <BarcodePrintModal
+          barcode={form.barcode}
+          productName={form.name}
+          sku={form.sku || null}
+          price={parseFloat(form.selling_price) || null}
+          onClose={() => { setShowBarcodeModal(false); onBack(); }}
+        />
+      )}
     </div>
   );
 }

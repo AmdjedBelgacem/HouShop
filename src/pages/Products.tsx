@@ -3,10 +3,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke } from '@tauri-apps/api/core';
 import type { Product, Category, CreateProduct, UpdateProduct, CreateInventoryTransaction } from '../lib/types';
 import CustomSelect from '../components/CustomSelect';
+import BarcodePrintModal from '../components/BarcodePrintModal';
 import { useI18n } from '../i18n';
 import {
   Search, Plus, Edit3, Trash2, PackagePlus, X,
-  ChevronDown, ArrowUpDown, AlertCircle,
+  ChevronDown, ArrowUpDown, AlertCircle, ScanBarcode,
 } from 'lucide-react';
 interface ProductsProps {
   onAddProduct: () => void;
@@ -23,6 +24,7 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
   const [stockProduct, setStockProduct] = useState<Product | null>(null);
   const [sortField, setSortField] = useState<'name' | 'quantity' | 'selling_price'>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [barcodeProduct, setBarcodeProduct] = useState<Product | null>(null);
   const { data: products, isLoading } = useQuery({
     queryKey: ['products', search],
     queryFn: () => search
@@ -218,6 +220,12 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
                           className="p-1.5 rounded-md text-accent-red hover:bg-red-50 transition-colors" title="Delete">
                           <Trash2 size={15} />
                         </button>
+                        {p.barcode && (
+                          <button onClick={() => setBarcodeProduct(p)}
+                            className="p-1.5 rounded-md text-text-muted hover:bg-surface transition-colors" title="Print Barcode">
+                            <ScanBarcode size={15} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -329,6 +337,16 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
             </form>
           </div>
         </ModalOverlay>
+      )}
+
+      {barcodeProduct && barcodeProduct.barcode && (
+        <BarcodePrintModal
+          barcode={barcodeProduct.barcode}
+          productName={barcodeProduct.name}
+          sku={barcodeProduct.sku ?? null}
+          price={barcodeProduct.selling_price}
+          onClose={() => setBarcodeProduct(null)}
+        />
       )}
     </div>
   );

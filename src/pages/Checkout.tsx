@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { useI18n } from '../i18n';
@@ -6,6 +6,11 @@ import type { Product, Category, ProductVariant, CreateSale, Sale, SaleItemWithP
 import { Plus, Minus, X, ShoppingCart, Package, Pencil, Check, Layers, Printer } from 'lucide-react';
 import SaleCompletionModal from '../components/SaleCompletionModal';
 import Invoice from '../components/Invoice';
+import ShippingLabel from '../components/ShippingLabel';
+interface CheckoutProps {
+  scannedProduct?: Product | null;
+  onScanHandled?: () => void;
+}
 interface CartItem {
   product: Product;
   variant: ProductVariant | null;
@@ -21,7 +26,7 @@ function getCoverImage(imagePath: string | null): string | null {
   } catch {  }
   return imagePath;
 }
-export default function Checkout() {
+export default function Checkout({ scannedProduct, onScanHandled }: CheckoutProps) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -32,6 +37,7 @@ export default function Checkout() {
   const [showCompletionModal, setShowCompletionModal] = useState(false);
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
   const [showInvoice, setShowInvoice] = useState(false);
+  const [showShippingLabel, setShowShippingLabel] = useState(false);
   const [completedSaleItems, setCompletedSaleItems] = useState<SaleItemWithProduct[]>([]);
   const [completedSaleCustomer, setCompletedSaleCustomer] = useState<Customer | null>(null);
   const { data: products } = useQuery({
@@ -46,6 +52,18 @@ export default function Checkout() {
     queryKey: ['customers'],
     queryFn: () => invoke<Customer[]>('get_customers'),
   });
+
+  const prevScannedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (scannedProduct) {
+      const key = `scan-${scannedProduct.id}-${Date.now()}`;
+      if (key !== prevScannedRef.current) {
+        prevScannedRef.current = key;
+        handleAddToCart(scannedProduct);
+        onScanHandled?.();
+      }
+    }
+  }, [scannedProduct]);
   const createSale = useMutation({
     mutationFn: (data: CreateSale) => invoke<Sale>('create_sale', { data }),
     onSuccess: (sale) => {
@@ -448,7 +466,7 @@ export default function Checkout() {
         />
       )}
       {}
-      {completedSale && !showInvoice && (
+      {completedSale && !showInvoice && !showShippingLabel && (
         <div className="invoice-no-print fixed bottom-6 left-1/2 -translate-x-1/2 z-[90] bg-accent-green text-white px-6 py-3 rounded-xl shadow-lg flex items-center gap-4">
           <span className="text-[13px] font-semibold">{t('checkout.saleCompleted', { id: 90000 + completedSale.id })}</span>
           <button
@@ -456,6 +474,12 @@ export default function Checkout() {
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-[12px] font-medium transition-colors"
           >
             <Printer size={13} /> {t('checkout.printInvoice')}
+          </button>
+          <button
+            onClick={() => setShowShippingLabel(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-[12px] font-medium transition-colors"
+          >
+            <Printer size={13} /> {t('shipping.printLabel')}
           </button>
           <button
             onClick={() => setCompletedSale(null)}
@@ -471,6 +495,15 @@ export default function Checkout() {
           items={completedSaleItems}
           customer={completedSaleCustomer}
           onClose={() => { setShowInvoice(false); setCompletedSale(null); }}
+        />
+      )}
+
+      {showShippingLabel && completedSale && (
+        <ShippingLabel
+          sale={completedSale}
+          items={completedSaleItems}
+          customer={completedSaleCustomer}
+          onClose={() => { setShowShippingLabel(false); setCompletedSale(null); }}
         />
       )}
     </div>
