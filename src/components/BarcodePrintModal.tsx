@@ -151,12 +151,11 @@ export default function BarcodePrintModal({ barcode, productName, sku, price, on
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
-            justifyContent: 'flex-start',
+            justifyContent: 'center',
             width: `${s.w}mm`,
             height: `${s.h}mm`,
             boxSizing: 'border-box',
             direction: 'ltr',
-            paddingTop: '1mm',
           }}
         >
           <p
@@ -174,13 +173,13 @@ export default function BarcodePrintModal({ barcode, productName, sku, price, on
           >
             {productName}
           </p>
-          <div style={{ display: 'flex', gap: '2mm', alignItems: 'center', marginTop: '0.5mm' }}>
+          <div style={{ display: 'flex', gap: '2mm', alignItems: 'center', marginTop: '0.3mm' }}>
             {sku && <p style={{ fontSize: s.skuFont, margin: 0 }} className="text-text-muted">SKU: {sku}</p>}
             {price != null && price > 0 && (
               <p style={{ fontSize: s.priceFont, fontWeight: 900, margin: 0 }} className="text-navy">{fmt(price)}</p>
             )}
           </div>
-          <div style={{ marginTop: '1mm', flex: 1, minHeight: 0, width: '100%', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+          <div style={{ marginTop: '0.5mm', display: 'flex', justifyContent: 'center' }}>
             <svg ref={svgRef} style={{ display: 'block', shapeRendering: 'crispEdges' }} />
           </div>
         </div>
