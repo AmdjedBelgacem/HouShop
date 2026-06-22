@@ -42,6 +42,194 @@ impl Default for PrintOpts {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Windows FFI. Uses `windows-sys` (raw bindings) whose signatures are 1:1 with
+// the Win32 C headers — no feature gating across modules, no Param/Result
+// wrappers, stable across releases.
+//
+// Verified signatures for windows-sys 0.59 (from the crate source):
+//   type HANDLE = *mut c_void
+//   type BOOL   = i32            // 0 == FALSE, nonzero == TRUE
+//   type PCWSTR = *const u16
+//   type PWSTR  = *mut u16
+//   OpenPrinterW(PCWSTR, *mut HANDLE, *const PRINTER_DEFAULTSW) -> BOOL
+//   EnumPrintersW(u32, PCWSTR, u32, *mut u8, u32, *mut u32, *mut u32) -> BOOL
+//   StartDocPrinterW(HANDLE, u32, *const DOC_INFO_1W) -> u32
+//   WritePrinter(HANDLE, *const c_void, u32, *mut u32) -> BOOL
+//   StartPagePrinter / EndPagePrinter / EndDocPrinter / ClosePrinter -> BOOL
+//   PRINTER_DEFAULTSW { pDatatype: PWSTR, pDevMode: *mut DEVMODEW, DesiredAccess: u32 }
+//   DOC_INFO_1W      { pDocName: PWSTR, pOutputFile: PWSTR, pDatatype: PWSTR }
+//   PRINTER_INFO_4W  { pPrinterName: PWSTR, pServerName: PWSTR, Attributes: u32 }
+// ---------------------------------------------------------------------------
+#[cfg(target_os = "windows")]
+mod win {
+    use windows_sys::Win32::Foundation::{BOOL, HANDLE};
+    use windows_sys::Win32::Graphics::Printing::{
+        ClosePrinter, EndDocPrinter, EndPagePrinter, EnumPrintersW, OpenPrinterW,
+        PRINTER_ACCESS_USE, PRINTER_DEFAULTSW, PRINTER_ENUM_CONNECTIONS, PRINTER_ENUM_LOCAL,
+        PRINTER_INFO_4W, StartDocPrinterW, StartPagePrinter, WritePrinter, DOC_INFO_1W,
+    };
+
+    /// Convert a Rust string to a NUL-terminated UTF-16 buffer.
+    pub fn to_wide(s: &str) -> Vec<u16> {
+        let mut v: Vec<u16> = s.encode_utf16().collect();
+        v.push(0);
+        v
+    }
+
+    /// Enumerate installed printer names (local + connections) via EnumPrintersW level 4.
+    pub fn list_printer_names() -> Result<Vec<String>, String> {
+        let flags = PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS;
+        let mut needed: u32 = 0;
+        let mut returned: u32 = 0;
+
+        // First pass: discover the required buffer size. This returns 0 (FALSE)
+        // with GetLastError() == ERROR_INSUFFICIENT_BUFFER, which is expected.
+        unsafe {
+            let _ = EnumPrintersW(
+                flags,
+                std::ptr::null(),
+                4,
+                std::ptr::null_mut(),
+                0,
+                &mut needed,
+                &mut returned,
+            );
+        }
+        if needed == 0 {
+            return Ok(Vec::new());
+        }
+
+        let mut buf = vec![0u8; needed as usize];
+        let mut returned: u32 = 0;
+        let ok: BOOL = unsafe {
+            EnumPrintersW(
+                flags,
+                std::ptr::null(),
+                4,
+                buf.as_mut_ptr(),
+                needed,
+                &mut needed,
+                &mut returned,
+            )
+        };
+        if ok == 0 {
+            return Err("EnumPrintersW failed".to_string());
+        }
+
+        // Reinterpret the byte buffer as an array of PRINTER_INFO_4W records.
+        let info_size = std::mem::size_of::<PRINTER_INFO_4W>();
+        let count = returned as usize;
+        let mut names = Vec::with_capacity(count);
+        for i in 0..count {
+            let offset = i * info_size;
+            if offset + info_size > buf.len() {
+                break;
+            }
+            let info: &PRINTER_INFO_4W =
+                unsafe { &*(buf.as_ptr().add(offset) as *const PRINTER_INFO_4W) };
+            // PRINTER_INFO_4W fields are PWSTR (raw pointers), not Options.
+            if !info.pPrinterName.is_null() {
+                // The string lives inside `buf`; copy it out before we borrow it.
+                names.push(unsafe { widestr_to_string(info.pPrinterName) });
+            }
+        }
+        names.sort_by_key(|n| n.to_lowercase());
+        Ok(names)
+    }
+
+    /// Build a Rust String from a NUL-terminated PCWSTR/PWSTR.
+    unsafe fn widestr_to_string(ptr: *const u16) -> String {
+        let mut len = 0usize;
+        while *{ ptr.add(len) } != 0 {
+            len += 1;
+        }
+        let slice = std::slice::from_raw_parts(ptr, len);
+        String::from_utf16_lossy(slice)
+    }
+
+    /// RAII guard that guarantees ClosePrinter on drop, even on early returns.
+    struct PrinterHandle(HANDLE);
+    impl Drop for PrinterHandle {
+        fn drop(&mut self) {
+            unsafe { let _ = ClosePrinter(self.0); }
+        }
+    }
+
+    /// Inject `payload` to the printer as a single RAW job.
+    pub fn send_raw_job(printer_name: &str, payload: &[u8]) -> Result<(), String> {
+        let name_w = to_wide(printer_name);
+
+        // PRINTER_DEFAULTSW: only DesiredAccess matters here; null datatype/devmode.
+        let mut defaults = PRINTER_DEFAULTSW {
+            pDatatype: std::ptr::null_mut(),
+            pDevMode: std::ptr::null_mut(),
+            DesiredAccess: PRINTER_ACCESS_USE,
+        };
+
+        let mut handle: HANDLE = std::ptr::null_mut();
+        let ok: BOOL = unsafe {
+            OpenPrinterW(
+                name_w.as_ptr(),
+                &mut handle,
+                &defaults,
+            )
+        };
+        if ok == 0 || handle.is_null() {
+            return Err(format!(
+                "OpenPrinterW failed for \"{}\". Make sure the printer is installed.",
+                printer_name
+            ));
+        }
+        let h = PrinterHandle(handle);
+
+        // Submit a single RAW document — the bytes go to the device verbatim.
+        let doc_name_w = to_wide("Label");
+        let raw_w = to_wide("RAW");
+        let doc_info = DOC_INFO_1W {
+            pDocName: doc_name_w.as_ptr() as *mut u16,
+            pOutputFile: std::ptr::null_mut(),
+            pDatatype: raw_w.as_ptr() as *mut u16,
+        };
+
+        let job = unsafe { StartDocPrinterW(h.0, 1, &doc_info) };
+        if job == 0 {
+            return Err("StartDocPrinterW failed".to_string());
+        }
+
+        let started: BOOL = unsafe { StartPagePrinter(h.0) };
+        if started == 0 {
+            unsafe { let _ = EndDocPrinter(h.0); }
+            return Err("StartPagePrinter failed".to_string());
+        }
+
+        // Send the entire TSPL payload in one WritePrinter call.
+        let mut written: u32 = 0;
+        let wrote: BOOL = unsafe {
+            WritePrinter(
+                h.0,
+                payload.as_ptr() as *const _,
+                payload.len() as u32,
+                &mut written,
+            )
+        };
+        unsafe { let _ = EndPagePrinter(h.0); }
+        unsafe { let _ = EndDocPrinter(h.0); }
+
+        if wrote == 0 {
+            return Err("WritePrinter failed".to_string());
+        }
+        if written as usize != payload.len() {
+            return Err(format!(
+                "Short write: {} of {} bytes sent",
+                written,
+                payload.len()
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// Enumerate locally-installed printer names.
 ///
 /// On Windows uses `EnumPrintersW`. Non-Windows targets return an error so the
@@ -50,68 +238,7 @@ impl Default for PrintOpts {
 pub async fn list_printers() -> Result<Vec<String>, String> {
     #[cfg(target_os = "windows")]
     {
-        use windows::Win32::Graphics::Printing::{
-            EnumPrintersW, PRINTER_ENUM_LOCAL, PRINTER_ENUM_CONNECTIONS, PRINTER_INFO_4W,
-        };
-
-        fn run() -> Result<Vec<String>, String> {
-            // Two-pass enum: first query the required byte count, then the actual data.
-            let flags = PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS;
-            let mut needed: u32 = 0;
-            let mut returned: u32 = 0;
-
-            unsafe {
-                let _ = EnumPrintersW(
-                    flags,
-                    None,
-                    4,
-                    None,
-                    0,
-                    &mut needed,
-                    &mut returned,
-                );
-            }
-            if needed == 0 {
-                return Ok(Vec::new());
-            }
-
-            let mut buf = vec![0u8; needed as usize];
-            let mut returned: u32 = 0;
-            let rc = unsafe {
-                EnumPrintersW(
-                    flags,
-                    None,
-                    4,
-                    Some(buf.as_mut_ptr()),
-                    needed,
-                    &mut needed,
-                    &mut returned,
-                )
-            };
-            if rc.is_err() {
-                return Err("EnumPrintersW failed".to_string());
-            }
-
-            // Reinterpret the byte buffer as an array of PRINTER_INFO_4W.
-            let info_size = std::mem::size_of::<PRINTER_INFO_4W>();
-            let count = returned as usize;
-            let mut names = Vec::with_capacity(count);
-            for i in 0..count {
-                let offset = i * info_size;
-                if offset + info_size > buf.len() {
-                    break;
-                }
-                let info: &PRINTER_INFO_4W =
-                    unsafe { &*(buf.as_ptr().add(offset) as *const PRINTER_INFO_4W) };
-                if let Some(name_pcwstr) = info.pPrinterName {
-                    names.push(name_pcwstr.to_string().map_err(|e| e.to_string())?);
-                }
-            }
-            names.sort_by_key(|n| n.to_lowercase());
-            Ok(names)
-        }
-
-        run()
+        win::list_printer_names()
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -173,10 +300,7 @@ fn build_tspl_payload(
 
     // BITMAP x,y,widthBytes,height,mode,<data>
     // mode 0 = overwrite, no scaling. x,y are in dots from REFERENCE 0,0.
-    let header = format!(
-        "BITMAP 0,0,{},{},0,",
-        width_bytes, height_px
-    );
+    let header = format!("BITMAP 0,0,{},{},0,", width_bytes, height_px);
     out.extend_from_slice(header.as_bytes());
     out.extend_from_slice(packed_bytes);
     out.push(b'\n');
@@ -205,97 +329,7 @@ pub async fn print_label(
 
     #[cfg(target_os = "windows")]
     {
-        use windows::core::PCWSTR;
-        use windows::Win32::Foundation::{CloseHandle, HANDLE};
-        use windows::Win32::Graphics::Printing::{
-            ClosePrinter, EndDocPrinter, EndPagePrinter, OpenPrinterW, StartDocPrinterW,
-            StartPagePrinter, WritePrinter, DOC_INFO_1W, PRINTER_DEFAULTSW,
-        };
-
-        fn run(
-            printer_name: &str,
-            payload: &[u8],
-        ) -> Result<(), String> {
-            // Open the printer with a wide name and request RAW access.
-            let mut name_utf16: Vec<u16> = printer_name.encode_utf16().collect();
-            name_utf16.push(0);
-
-            let mut defaults = PRINTER_DEFAULTSW {
-                DesiredAccess: windows::Win32::Graphics::Printing::PRINTER_ACCESS_USE,
-                ..Default::default()
-            };
-
-            let mut handle: HANDLE = HANDLE::default();
-            let rc = unsafe {
-                OpenPrinterW(
-                    PCWSTR(name_utf16.as_ptr()),
-                    &mut handle,
-                    Some(&mut defaults),
-                )
-            };
-            if rc.is_err() || handle.is_invalid() {
-                return Err(format!(
-                    "OpenPrinterW failed for \"{}\". Make sure the printer is installed and shared.",
-                    printer_name
-                ));
-            }
-
-            // RAII guard: guarantee ClosePrinter even on early-return paths.
-            struct PrinterGuard(HANDLE);
-            impl Drop for PrinterGuard {
-                fn drop(&mut self) {
-                    unsafe { let _ = ClosePrinter(self.0); }
-                }
-            }
-            let _guard = PrinterGuard(handle);
-
-            // Submit a single RAW document — the bytes go to the device verbatim.
-            let mut raw_pcwstr: Vec<u16> = "RAW".encode_utf16().collect();
-            raw_pcwstr.push(0);
-            let doc_info = DOC_INFO_1W {
-                pDocName: PCWSTR(b"Label\0".as_ptr() as *const u16),
-                pOutputFile: PCWSTR::null(),
-                pDatatype: PCWSTR(raw_pcwstr.as_ptr()),
-            };
-
-            let job = unsafe { StartDocPrinterW(handle, 1, &doc_info as *const _ as _) };
-            if job == 0 {
-                return Err("StartDocPrinterW failed".to_string());
-            }
-
-            let page_rc = unsafe { StartPagePrinter(handle) };
-            if page_rc.is_err() {
-                unsafe { let _ = EndDocPrinter(handle); }
-                return Err("StartPagePrinter failed".to_string());
-            }
-
-            // Send the entire TSPL payload in one WritePrinter call.
-            let mut written: u32 = 0;
-            let write_rc = unsafe {
-                WritePrinter(
-                    handle,
-                    payload.as_ptr() as *const _,
-                    payload.len() as u32,
-                    &mut written,
-                )
-            };
-            let _ = unsafe { EndPagePrinter(handle) };
-            let _ = unsafe { EndDocPrinter(handle) };
-
-            if write_rc.is_err() {
-                return Err("WritePrinter failed".to_string());
-            }
-            if written as usize != payload.len() {
-                return Err(format!(
-                    "Short write: {} of {} bytes sent",
-                    written,
-                    payload.len()
-                ));
-            }
-            Ok(())
-        }
-
-        run(&printer_name, &payload)
+        win::send_raw_job(&printer_name, &payload)
     }
     #[cfg(not(target_os = "windows"))]
     {

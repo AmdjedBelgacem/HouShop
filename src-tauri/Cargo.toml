@@ -31,6 +31,14 @@ custom-protocol = ["tauri/custom-protocol"]
 
 # Windows-only: RAW data injection to the printer via the Spooler API
 # (OpenPrinterW / StartDocPrinterW with pDatatype = "RAW" / WritePrinter).
-# Gated to cfg(windows) so the project still compiles on the macOS dev machine.
+# Uses `windows-sys` (raw FFI) rather than the `windows` wrapper crate: the
+# Spooler functions are 1:1 with the C headers here (no Param/Result/handle
+# wrappers). `Win32_Graphics_Gdi` is required because PRINTER_DEFAULTSW (which
+# has a *mut DEVMODEW field) is cfg-gated behind it in windows-sys. Gated to
+# cfg(windows) so the project still compiles on the macOS dev machine.
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.59", features = ["Win32_Graphics_Printing", "Win32_Foundation"] }
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Printing",
+] }
