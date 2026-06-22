@@ -14,11 +14,55 @@
 
 import JsBarcode from 'jsbarcode';
 
+/**
+ * Per-element visibility toggles. When false, the element is neither measured
+ * nor drawn, so the remaining content re-centers to fill the space. All
+ * default to true.
+ */
+export interface LabelVisibility {
+  name?: boolean;
+  variant?: boolean;
+  price?: boolean;
+  barcode?: boolean;
+}
+
+/**
+ * Per-element styling overrides. Each entry optionally scales the element's
+ * font size (`fontScale`, 1.0 = default) and nudges its vertical position
+ * (`offsetY`, dots, +down / -up). Affects only its own element; the rest of
+ * the layout (centering, stacking) is recomputed from the resulting heights.
+ */
+export interface LabelStyling {
+  name?: { fontScale?: number; offsetY?: number };
+  variant?: { fontScale?: number; offsetY?: number };
+  price?: { fontScale?: number; offsetY?: number };
+}
+
 export interface RenderLabelInput {
   barcode: string;
   productName: string;
-  sku: string | null;
+  /** Optional variant title (e.g. "Red / Large") printed under the product name. */
+  variantName?: string | null;
+  /** SKU is accepted for API compatibility but no longer printed on the label. */
+  sku?: string | null;
   price?: number | null;
+  /**
+   * Horizontal shift in dots applied to every drawn element. Negative shifts
+   * the whole content block left, positive shifts right. Used to compensate
+   * for printhead-to-label registration offsets so content sits visually
+   * centered on the physical label. Default 0.
+   */
+  shiftX?: number;
+  /** Per-element visibility. Omit for "show everything". */
+  visibility?: LabelVisibility;
+  /** Per-element font scale + vertical offset overrides. Omit for defaults. */
+  styling?: LabelStyling;
+  /**
+   * When true, merge the variant title into the product name as a single
+   * inline title line (e.g. "Product — Red"), drawn at the name's font size.
+   * The standalone variant block is then skipped. Default false.
+   */
+  combineNameVariant?: boolean;
   /** Canvas width in printer dots (e.g. 280 for 35mm @ 203 DPI). Must be a multiple of 8. */
   widthPx: number;
   /** Canvas height in printer dots (e.g. 360 for 45mm @ 203 DPI). */
@@ -181,11 +225,160 @@ function uint8ToBase64(bytes: Uint8Array): string {
 }
 
 /**
+ * Draw the label onto `ctx` (white background + black content). Shared by the
+ * print path (which then packs the pixels) and the on-screen preview. Caller is
+ * responsible for sizing `ctx.canvas` to `widthPx × heightPx` already.
+ */
+function drawLabel(
+  ctx: CanvasRenderingContext2D,
+  input: RenderLabelInput,
+  vis: Required<LabelVisibility>,
+  style: Required<LabelStyling>,
+) {
+  const { barcode, productName, variantName, price, widthPx, heightPx } = input;
+  const shiftX = Math.round(input.shiftX ?? 0);
+
+  // --- Step 1a: white background, crisp settings ---------------------------
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, widthPx, heightPx);
+  ctx.fillStyle = '#000000';
+  ctx.textBaseline = 'top';
+  ctx.imageSmoothingEnabled = false;
+
+  const padX = Math.max(4, Math.round(widthPx * 0.04));
+  const nameMaxWidth = widthPx - padX * 2;
+
+  // --- PASS 1: measure all content heights so we can center vertically ---
+  // Layout: name (small) → variant title (smaller) → price (large) → barcode.
+  // SKU is intentionally NOT printed on the label. Each block is gated on both
+  // its visibility toggle AND non-empty content, so hidden/empty blocks don't
+  // reserve vertical space and the rest re-centers.
+  const priceText = vis.price && price != null && price > 0 ? fmt(price) : '';
+  const variantRaw = variantName ? variantName.trim() : '';
+  // When combining, the variant is merged into the title line and the standalone
+  // variant block is suppressed.
+  const combine = !!input.combineNameVariant && vis.name && vis.variant && !!variantRaw;
+  const variantText = combine ? '' : (vis.variant && variantName ? variantRaw : '');
+
+  // The title text used for fitting/wrapping. When combining, append the variant
+  // with an em dash so it reads as "Product — Variant" on one (wrapped) block.
+  const titleText = combine && productName
+    ? `${productName} — ${variantRaw}`
+    : (productName || '');
+
+  // Base font sizes, then scaled per-element by the user's styling overrides.
+  // Clamped to a sensible minimum so scaling down never produces invisible text.
+  const nameFont = Math.max(5, Math.round(widthPx * 0.045 * style.name.fontScale));
+  const variantFont = Math.max(4, Math.round(widthPx * 0.038 * style.variant.fontScale));
+  const priceFont = Math.max(7, Math.round(widthPx * 0.11 * style.price.fontScale));
+
+  const nameLines =
+    vis.name && productName
+      ? fitNameFont(ctx, titleText, nameMaxWidth, Math.round(heightPx * 0.18 * style.name.fontScale), 2).lines
+      : [];
+  const nameLineHeight = nameFont * 1.12;
+  const nameBlockH = nameLines.length * nameLineHeight;
+
+  ctx.font = `400 ${variantFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  const variantBlockH = variantText ? variantFont * 1.2 : 0;
+
+  ctx.font = `900 ${priceFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  const priceBlockH = priceText ? priceFont * 1.2 : 0;
+
+  const barCanvas = vis.barcode ? renderBarcodeCanvas(barcode, widthPx) : null;
+  const barBlockH = barCanvas
+    ? Math.floor(barCanvas.height * Math.min((widthPx - padX * 2) / barCanvas.width))
+    : 0;
+
+  // Tight inter-block spacing: keeps content grouped, centered as one block.
+  const gapNameVariant = Math.round(heightPx * 0.01);
+  const gapVariantPrice = Math.round(heightPx * 0.015);
+  const gapPriceBar = Math.round(heightPx * 0.02);
+
+  let totalContentH = nameBlockH;
+  if (variantBlockH) totalContentH += gapNameVariant + variantBlockH;
+  if (priceBlockH) totalContentH += gapVariantPrice + priceBlockH;
+  if (barBlockH) totalContentH += gapPriceBar + barBlockH;
+
+  // Vertical center offset. Floor so we don't blur rows across dot boundaries.
+  let cursorY = Math.max(padX, Math.floor((heightPx - totalContentH) / 2));
+
+  // --- PASS 2: draw name (centered, sized) -------------------------------
+  // Each element's draw Y also gets its own offsetY nudge (dots).
+  ctx.font = `700 ${nameFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  const nameStartY = cursorY + style.name.offsetY;
+  let nameY = nameStartY;
+  for (const line of nameLines) {
+    ctx.fillText(line, (widthPx - ctx.measureText(line).width) / 2 + shiftX, nameY);
+    nameY += nameLineHeight;
+  }
+  cursorY += nameBlockH;
+
+  // --- PASS 2: variant title (centered, smaller than name) ---------------
+  if (variantText) {
+    cursorY += gapNameVariant;
+    ctx.font = `400 ${variantFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+    ctx.fillText(
+      variantText,
+      (widthPx - ctx.measureText(variantText).width) / 2 + shiftX,
+      cursorY + style.variant.offsetY,
+    );
+    cursorY += variantBlockH;
+  }
+
+  // --- PASS 2: price (centered, the dominant element) --------------------
+  if (priceText) {
+    cursorY += gapVariantPrice;
+    ctx.font = `900 ${priceFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+    ctx.fillText(
+      priceText,
+      (widthPx - ctx.measureText(priceText).width) / 2 + shiftX,
+      cursorY + style.price.offsetY,
+    );
+    cursorY += priceBlockH;
+  }
+
+  // --- PASS 2: barcode (flush under the price) --------------------------
+  if (barCanvas) {
+    cursorY += gapPriceBar;
+    const maxBarWidth = widthPx - padX * 2;
+    const scale = maxBarWidth / barCanvas.width;
+    const drawW = Math.floor(barCanvas.width * scale);
+    const drawH = Math.floor(barCanvas.height * scale);
+    const dx = Math.floor((widthPx - drawW) / 2) + shiftX;
+    ctx.drawImage(barCanvas, dx, cursorY, drawW, drawH);
+  }
+}
+
+/** Normalize a partial visibility object to all four booleans. */
+function resolveVisibility(v: LabelVisibility | undefined): Required<LabelVisibility> {
+  return {
+    name: v?.name ?? true,
+    variant: v?.variant ?? true,
+    price: v?.price ?? true,
+    barcode: v?.barcode ?? true,
+  };
+}
+
+/** Normalize a partial styling object so every element has both knobs. */
+function resolveStyling(s: LabelStyling | undefined): Required<LabelStyling> {
+  const norm = (e: { fontScale?: number; offsetY?: number } | undefined) => ({
+    fontScale: e?.fontScale ?? 1,
+    offsetY: e?.offsetY ?? 0,
+  });
+  return {
+    name: norm(s?.name),
+    variant: norm(s?.variant),
+    price: norm(s?.price),
+  };
+}
+
+/**
  * Compose the label and return its packed 1-bit bitmap.
  * Throws on invalid barcode / invalid dimensions.
  */
 export function renderLabelToBitmap(input: RenderLabelInput): RenderedBitmap {
-  const { barcode, productName, sku, price, widthPx, heightPx } = input;
+  const { widthPx, heightPx } = input;
   if (widthPx <= 0 || heightPx <= 0) {
     throw new Error(`Invalid canvas dimensions ${widthPx}×${heightPx}`);
   }
@@ -199,93 +392,33 @@ export function renderLabelToBitmap(input: RenderLabelInput): RenderedBitmap {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('Failed to acquire 2D canvas context');
 
-  // --- Step 1a: white background, crisp settings ---------------------------
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, widthPx, heightPx);
-  ctx.fillStyle = '#000000';
-  ctx.textBaseline = 'top';
-  ctx.imageSmoothingEnabled = false;
-
-  const padX = Math.max(4, Math.round(widthPx * 0.04));
-  const nameMaxWidth = widthPx - padX * 2;
-
-  // --- PASS 1: measure all content heights so we can center vertically ---
-  const priceText = price != null && price > 0 ? fmt(price) : '';
-  const skuText = sku ? `SKU: ${sku}` : '';
-  const rowGap = Math.round(widthPx * 0.025);
-  // Bumped font scales for legibility on small labels.
-  const skuFont = Math.max(8, Math.round(widthPx * 0.055));
-  const priceFont = Math.max(10, Math.round(widthPx * 0.075));
-
-  const { fontPx: nameFont, lines: nameLines } = fitNameFont(
-    ctx,
-    productName || '',
-    nameMaxWidth,
-    Math.round(heightPx * 0.30),
-    2,
-  );
-  const nameLineHeight = nameFont * 1.12;
-  const nameBlockH = nameLines.length * nameLineHeight;
-
-  ctx.font = `900 ${priceFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-  const priceRowH = priceText || skuText ? priceFont * 1.25 : 0;
-
-  const barCanvas = renderBarcodeCanvas(barcode, widthPx);
-  const barBlockH = barCanvas
-    ? Math.floor(barCanvas.height * Math.min((widthPx - padX * 2) / barCanvas.width))
-    : 0;
-
-  // Small inter-block spacing: tight so content groups, but non-zero for readability.
-  const gapNamePrice = Math.round(heightPx * 0.015);
-  const gapPriceBar = Math.round(heightPx * 0.02);
-  const totalContentH =
-    nameBlockH + (priceRowH ? gapNamePrice + priceRowH : 0) + (barBlockH ? gapPriceBar + barBlockH : 0);
-
-  // Vertical center offset. Floor so we don't blur rows across dot boundaries.
-  let cursorY = Math.max(padX, Math.floor((heightPx - totalContentH) / 2));
-
-  // --- PASS 2: draw name (centered) --------------------------------------
-  ctx.font = `900 ${nameFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-  for (const line of nameLines) {
-    ctx.fillText(line, (widthPx - ctx.measureText(line).width) / 2, cursorY);
-    cursorY += nameLineHeight;
-  }
-
-  // --- PASS 2: SKU + price row (centered) --------------------------------
-  if (priceRowH) {
-    cursorY += gapNamePrice;
-    ctx.font = `400 ${skuFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-    const skuW = skuText ? ctx.measureText(skuText).width : 0;
-    ctx.font = `900 ${priceFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-    const priceW = priceText ? ctx.measureText(priceText).width : 0;
-    const rowW = skuW + (skuW && priceW ? rowGap : 0) + priceW;
-
-    let rowX = (widthPx - rowW) / 2;
-    if (skuText) {
-      ctx.font = `400 ${skuFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-      ctx.fillText(skuText, rowX, cursorY);
-      rowX += skuW + rowGap;
-    }
-    if (priceText) {
-      ctx.font = `900 ${priceFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-      ctx.fillText(priceText, rowX, cursorY);
-    }
-    cursorY += priceRowH;
-  }
-
-  // --- PASS 2: barcode (flush under the text row) ------------------------
-  if (barCanvas) {
-    cursorY += gapPriceBar;
-    const maxBarWidth = widthPx - padX * 2;
-    const scale = maxBarWidth / barCanvas.width;
-    const drawW = Math.floor(barCanvas.width * scale);
-    const drawH = Math.floor(barCanvas.height * scale);
-    const dx = Math.floor((widthPx - drawW) / 2);
-    ctx.drawImage(barCanvas, dx, cursorY, drawW, drawH);
-  }
+  drawLabel(ctx, input, resolveVisibility(input.visibility), resolveStyling(input.styling));
 
   // --- Step 2 + 3: threshold + pack to 1-bit bytes ------------------------
   const { packedBase64, widthBytes } = packMonochrome(ctx, widthPx, heightPx);
 
   return { packedBase64, widthBytes, widthPx, heightPx };
+}
+
+/**
+ * Render the label to a PNG data URL for on-screen preview. This is the exact
+ * same layout the printer will output (same canvas, same drawLabel), just
+ * returned as an image instead of packed bytes. Cheap to call on every UI change.
+ */
+export function renderLabelToDataURL(input: RenderLabelInput): string {
+  const { widthPx, heightPx } = input;
+  if (widthPx <= 0 || heightPx <= 0) {
+    throw new Error(`Invalid canvas dimensions ${widthPx}×${heightPx}`);
+  }
+  // Preview canvas doesn't need the byte-alignment constraint, but rounding the
+  // width up to a multiple of 8 keeps the preview 1:1 with the printed bitmap.
+  const w = Math.ceil(widthPx / 8) * 8;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = heightPx;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Failed to acquire 2D canvas context');
+
+  drawLabel(ctx, { ...input, widthPx: w }, resolveVisibility(input.visibility), resolveStyling(input.styling));
+  return canvas.toDataURL('image/png');
 }

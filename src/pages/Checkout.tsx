@@ -9,6 +9,9 @@ import Invoice from '../components/Invoice';
 import ShippingLabel from '../components/ShippingLabel';
 interface CheckoutProps {
   scannedProduct?: Product | null;
+  /** If the scan matched a variant barcode, this is that variant — auto-add it
+   *  instead of opening the variant picker. */
+  scannedVariant?: ProductVariant | null;
   onScanHandled?: () => void;
 }
 interface CartItem {
@@ -26,7 +29,7 @@ function getCoverImage(imagePath: string | null): string | null {
   } catch {  }
   return imagePath;
 }
-export default function Checkout({ scannedProduct, onScanHandled }: CheckoutProps) {
+export default function Checkout({ scannedProduct, scannedVariant, onScanHandled }: CheckoutProps) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -54,16 +57,6 @@ export default function Checkout({ scannedProduct, onScanHandled }: CheckoutProp
   });
 
   const prevScannedRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (scannedProduct) {
-      const key = `scan-${scannedProduct.id}-${Date.now()}`;
-      if (key !== prevScannedRef.current) {
-        prevScannedRef.current = key;
-        handleAddToCart(scannedProduct);
-        onScanHandled?.();
-      }
-    }
-  }, [scannedProduct]);
   const createSale = useMutation({
     mutationFn: (data: CreateSale) => invoke<Sale>('create_sale', { data }),
     onSuccess: (sale) => {
@@ -124,6 +117,26 @@ export default function Checkout({ scannedProduct, onScanHandled }: CheckoutProp
       addToCartWithVariant(product, null);
     }
   };
+
+  // Scan handling: placed after handleAddToCart / addToCartWithVariant so the
+  // effect can reference them without "used before declaration" warnings.
+  useEffect(() => {
+    if (scannedProduct) {
+      const key = `scan-${scannedProduct.id}-${scannedVariant?.id ?? 'base'}-${Date.now()}`;
+      if (key !== prevScannedRef.current) {
+        prevScannedRef.current = key;
+        // If the scan matched a specific variant barcode, add that variant
+        // directly — no need to open the picker to re-select it.
+        if (scannedVariant) {
+          addToCartWithVariant(scannedProduct, scannedVariant);
+        } else {
+          handleAddToCart(scannedProduct);
+        }
+        onScanHandled?.();
+      }
+    }
+  }, [scannedProduct, scannedVariant]);
+
   const updateQty = (idx: number, delta: number) => {
     setCart(prev => prev.map((item, i) => {
       if (i !== idx) return item;

@@ -52,6 +52,7 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
   const [hasVariants, setHasVariants] = useState(false);
   const [variants, setVariants] = useState<(CreateVariant & { _expanded?: boolean })[]>([]);
   const [showBarcodeModal, setShowBarcodeModal] = useState(false);
+  const [createdProductId, setCreatedProductId] = useState<number | null>(null);
   const barcodeSvgRef = useRef<SVGSVGElement>(null);
 
   function generateBarcodeValue(_name: string): string {
@@ -158,6 +159,7 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
         queryClient.invalidateQueries({ queryKey: ['product-variants'] });
       }
       if (!isEditing && form.barcode) {
+        setCreatedProductId(productId);
         setShowBarcodeModal(true);
       } else {
         onBack();
@@ -574,6 +576,7 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
         <BarcodePrintModal
           barcode={form.barcode}
           productName={form.name}
+          productId={createdProductId ?? undefined}
           sku={form.sku || null}
           price={parseFloat(form.selling_price) || null}
           onClose={() => { setShowBarcodeModal(false); onBack(); }}

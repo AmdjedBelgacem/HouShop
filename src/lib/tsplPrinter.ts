@@ -14,6 +14,7 @@ export interface TsplPrintOpts {
   density: number;
   direction: number;
   shift: number;
+  shiftX: number;
   labelHeightMm: number;
   labelWidthMm: number;
   gapMm: number;
@@ -63,7 +64,7 @@ export interface PaperPreset {
 
 export const PAPER_PRESETS: PaperPreset[] = [
   { key: 'medium', label: '35×34mm', widthMm: 35, heightMm: 34, gapMm: 2 },
-  { key: 'small', label: '20×40mm', widthMm: 20, heightMm: 40, gapMm: 2 },
+  { key: 'small', label: '25×17mm', widthMm: 24.5, heightMm: 17, gapMm: 2 },
 ];
 
 /**
@@ -85,7 +86,12 @@ export async function printLabel(
   const heightPx = mmToDots(paper.heightMm, RESOLUTION_DPI);
 
   // Steps 2–3 (frontend): render + threshold + pack to 1-bit bytes.
-  const bitmap = renderLabelToBitmap({ ...label, widthPx, heightPx });
+  const bitmap = renderLabelToBitmap({
+    ...label,
+    shiftX: opts.shiftX,
+    widthPx,
+    heightPx,
+  });
 
   // Step 4 (Rust): wrap in TSPL + inject via RAW Windows Spooler.
   await invoke('print_label', {
@@ -97,6 +103,7 @@ export async function printLabel(
       density: opts.density,
       direction: opts.direction,
       shift: opts.shift,
+      shift_x: opts.shiftX,
       label_height_mm: opts.labelHeightMm,
       label_width_mm: opts.labelWidthMm,
       gap_mm: opts.gapMm,

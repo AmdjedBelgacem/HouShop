@@ -343,6 +343,7 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
         <BarcodePrintModal
           barcode={barcodeProduct.barcode}
           productName={barcodeProduct.name}
+          productId={barcodeProduct.id}
           sku={barcodeProduct.sku ?? null}
           price={barcodeProduct.selling_price}
           onClose={() => setBarcodeProduct(null)}

@@ -1,17 +1,26 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import type { Product } from '../lib/types';
+import type { BarcodeLookup } from '../lib/types';
 
-const SCANNER_THRESHOLD_MS = 50;
 const MIN_CHARS = 3;
 const SCAN_TIMEOUT_MS = 300;
 
-export function useBarcodeScanner(onScan: (product: Product) => void) {
+/**
+ * Hardware barcode scanner hook (keyboard-wedge).
+ *
+ * Scanners emit a rapid burst of keypresses terminated by Enter, faster than a
+ * human can type. We buffer characters within a short window and, on Enter,
+ * look the barcode up via `get_product_by_barcode`. The result carries both the
+ * product and (if the scanned barcode belongs to a variant) the matched
+ * variant, so checkout can auto-select it instead of re-opening the picker.
+ */
+export function useBarcodeScanner(onScan: (lookup: BarcodeLookup) => void) {
   const buffer = useRef<{ chars: string; firstTime: number }>({ chars: '', firstTime: 0 });
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const processingRef = useRef(false);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    // Ignore typing in form fields — the scanner shouldn't hijack input focus.
     const target = e.target as HTMLElement;
     const tag = target.tagName.toLowerCase();
     if (tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable) {
@@ -29,10 +38,10 @@ export function useBarcodeScanner(onScan: (product: Product) => void) {
 
       if (chars.length >= MIN_CHARS && elapsed < SCAN_TIMEOUT_MS && !processingRef.current) {
         processingRef.current = true;
-        invoke<Product>('get_product_by_barcode', { barcode: chars })
-          .then(product => {
-            if (product) {
-              onScan(product);
+        invoke<BarcodeLookup>('get_product_by_barcode', { barcode: chars })
+          .then(lookup => {
+            if (lookup) {
+              onScan(lookup);
             }
           })
           .catch(() => { })

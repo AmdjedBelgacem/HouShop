@@ -211,6 +211,27 @@ export interface ProductVariant {
   created_at: string;
   updated_at: string;
 }
+/**
+ * Result of a barcode lookup. `variant` is set when the scanned barcode belongs
+ * to a specific variant (not the product itself), so checkout can auto-select it.
+ */
+export interface BarcodeLookup {
+  id: number;
+  name: string;
+  category_id: number | null;
+  category_name: string | null;
+  quantity: number;
+  cost_price: number;
+  selling_price: number;
+  barcode: string | null;
+  image_path: string | null;
+  description: string | null;
+  sku: string | null;
+  low_stock_threshold: number;
+  created_at: string;
+  updated_at: string;
+  variant: ProductVariant | null;
+}
 export interface CreateVariant {
   product_id: number;
   variant_name: string;

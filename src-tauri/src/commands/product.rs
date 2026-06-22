@@ -1,7 +1,7 @@
 use sqlx::SqlitePool;
 use tauri::State;
 use crate::models::{
-    Category, CreateCategory, CreateProduct, CreateVariant, Product, ProductVariant,
+    BarcodeLookup, Category, CreateCategory, CreateProduct, CreateVariant, Product, ProductVariant,
     ProductWithCategory, UpdateProduct, UpdateVariant,
 };
 #[tauri::command]
@@ -58,8 +58,13 @@ pub async fn get_products(pool: State<'_, SqlitePool>) -> Result<Vec<ProductWith
 pub async fn get_product_by_barcode(
     pool: State<'_, SqlitePool>,
     barcode: String,
-) -> Result<ProductWithCategory, String> {
-    sqlx::query_as(
+) -> Result<BarcodeLookup, String> {
+    // Match the barcode against either the product's own barcode OR any of its
+    // variants' barcodes. The scanner reads whatever was printed on the label,
+    // which may be a variant barcode (variants have their own EAN-13). When a
+    // variant barcode matched, we also return that variant so the frontend can
+    // auto-select it in checkout instead of re-opening the variant picker.
+    let product = sqlx::query_as::<_, ProductWithCategory>(
         r#"
         SELECT p.id, p.name, p.category_id, c.name as category_name,
                p.quantity, p.cost_price, p.selling_price, p.barcode,
@@ -67,14 +72,40 @@ pub async fn get_product_by_barcode(
                p.created_at, p.updated_at
         FROM products p
         LEFT JOIN categories c ON p.category_id = c.id
-        WHERE p.barcode = ?
+        LEFT JOIN product_variants pv ON pv.product_id = p.id
+        WHERE p.barcode = ? OR pv.barcode = ?
+        LIMIT 1
         "#,
     )
+    .bind(&barcode)
     .bind(&barcode)
     .fetch_optional(pool.inner())
     .await
     .map_err(|e| format!("Failed to search product: {}", e))?
-    .ok_or("Product not found".to_string())
+    .ok_or("Product not found".to_string())?;
+
+    // If the barcode didn't match the product's own barcode, it must belong to
+    // a variant — fetch that variant so the caller can identify it precisely.
+    let variant = if product.barcode.as_deref() == Some(barcode.as_str()) {
+        None
+    } else {
+        sqlx::query_as::<_, ProductVariant>(
+            r#"
+            SELECT id, product_id, variant_name, condition_note, quantity,
+                   cost_price, selling_price, barcode, sku, image_path,
+                   created_at, updated_at
+            FROM product_variants
+            WHERE barcode = ?
+            LIMIT 1
+            "#,
+        )
+        .bind(&barcode)
+        .fetch_optional(pool.inner())
+        .await
+        .map_err(|e| format!("Failed to fetch variant: {}", e))?
+    };
+
+    Ok(BarcodeLookup { product, variant })
 }
 #[tauri::command]
 pub async fn search_products(

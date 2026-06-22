@@ -266,6 +266,16 @@ pub struct ProductVariant {
     pub created_at: String,
     pub updated_at: String,
 }
+/// Result of a barcode lookup: the product, plus the specific variant whose
+/// barcode matched (if the scanned barcode belongs to a variant rather than
+/// the product itself). When `variant` is `Some`, the scanner auto-selects
+/// that variant in checkout instead of opening the variant picker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BarcodeLookup {
+    #[serde(flatten)]
+    pub product: ProductWithCategory,
+    pub variant: Option<ProductVariant>,
+}
 #[derive(Debug, Deserialize)]
 pub struct CreateVariant {
     pub product_id: i64,

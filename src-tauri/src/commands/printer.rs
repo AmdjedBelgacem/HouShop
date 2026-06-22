@@ -21,6 +21,10 @@ pub struct PrintOpts {
     pub direction: u8,
     /// Vertical offset in dots to compensate for die-cut registration drift. Default 0.
     pub shift: i32,
+    /// Horizontal offset in dots applied to the BITMAP x-coordinate, to
+    /// compensate for printhead-to-label registration offsets that shift
+    /// content right of center. Negative shifts left, positive shifts right. Default 0.
+    pub shift_x: i32,
     /// Physical label height in millimetres (drives SIZE/GAP). Default 45.0.
     pub label_height_mm: f32,
     /// Physical label width in millimetres (drives SIZE). Default 35.0.
@@ -35,6 +39,7 @@ impl Default for PrintOpts {
             density: 8,
             direction: 0,
             shift: 0,
+            shift_x: 0,
             label_height_mm: 45.0,
             label_width_mm: 35.0,
             gap_mm: 2.0,
