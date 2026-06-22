@@ -206,67 +206,82 @@ export function renderLabelToBitmap(input: RenderLabelInput): RenderedBitmap {
   ctx.textBaseline = 'top';
   ctx.imageSmoothingEnabled = false;
 
-  const padX = Math.max(4, Math.round(widthPx * 0.03));
-
-  // --- Step 1b: product name (top, fitted + wrapped) ----------------------
-  let cursorY = padX;
+  const padX = Math.max(4, Math.round(widthPx * 0.04));
   const nameMaxWidth = widthPx - padX * 2;
+
+  // --- PASS 1: measure all content heights so we can center vertically ---
+  const priceText = price != null && price > 0 ? fmt(price) : '';
+  const skuText = sku ? `SKU: ${sku}` : '';
+  const rowGap = Math.round(widthPx * 0.025);
+  // Bumped font scales for legibility on small labels.
+  const skuFont = Math.max(8, Math.round(widthPx * 0.055));
+  const priceFont = Math.max(10, Math.round(widthPx * 0.075));
+
   const { fontPx: nameFont, lines: nameLines } = fitNameFont(
     ctx,
     productName || '',
     nameMaxWidth,
-    Math.round(heightPx * 0.22),
+    Math.round(heightPx * 0.30),
     2,
   );
+  const nameLineHeight = nameFont * 1.12;
+  const nameBlockH = nameLines.length * nameLineHeight;
+
+  ctx.font = `900 ${priceFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  const priceRowH = priceText || skuText ? priceFont * 1.25 : 0;
+
+  const barCanvas = renderBarcodeCanvas(barcode, widthPx);
+  const barBlockH = barCanvas
+    ? Math.floor(barCanvas.height * Math.min((widthPx - padX * 2) / barCanvas.width))
+    : 0;
+
+  // Small inter-block spacing: tight so content groups, but non-zero for readability.
+  const gapNamePrice = Math.round(heightPx * 0.015);
+  const gapPriceBar = Math.round(heightPx * 0.02);
+  const totalContentH =
+    nameBlockH + (priceRowH ? gapNamePrice + priceRowH : 0) + (barBlockH ? gapPriceBar + barBlockH : 0);
+
+  // Vertical center offset. Floor so we don't blur rows across dot boundaries.
+  let cursorY = Math.max(padX, Math.floor((heightPx - totalContentH) / 2));
+
+  // --- PASS 2: draw name (centered) --------------------------------------
   ctx.font = `900 ${nameFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-  const nameLineHeight = nameFont * 1.15;
   for (const line of nameLines) {
     ctx.fillText(line, (widthPx - ctx.measureText(line).width) / 2, cursorY);
     cursorY += nameLineHeight;
   }
 
-  // --- Step 1c: SKU + price row ------------------------------------------
-  cursorY += Math.round(heightPx * 0.01);
-  const priceText = price != null && price > 0 ? fmt(price) : '';
-  const skuText = sku ? `SKU: ${sku}` : '';
-  const rowGap = Math.round(widthPx * 0.02);
-  const skuFont = Math.max(7, Math.round(widthPx * 0.04));
-  const priceFont = Math.max(9, Math.round(widthPx * 0.055));
-
-  // Measure both segments to center the combined row.
-  ctx.font = `400 ${skuFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-  const skuW = skuText ? ctx.measureText(skuText).width : 0;
-  ctx.font = `900 ${priceFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-  const priceW = priceText ? ctx.measureText(priceText).width : 0;
-  const rowW = skuW + (skuW && priceW ? rowGap : 0) + priceW;
-
-  let rowX = (widthPx - rowW) / 2;
-  if (skuText) {
+  // --- PASS 2: SKU + price row (centered) --------------------------------
+  if (priceRowH) {
+    cursorY += gapNamePrice;
     ctx.font = `400 ${skuFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-    ctx.fillText(skuText, rowX, cursorY);
-    rowX += skuW + rowGap;
-  }
-  if (priceText) {
+    const skuW = skuText ? ctx.measureText(skuText).width : 0;
     ctx.font = `900 ${priceFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-    ctx.fillText(priceText, rowX, cursorY);
-  }
-  cursorY += priceFont * 1.2;
+    const priceW = priceText ? ctx.measureText(priceText).width : 0;
+    const rowW = skuW + (skuW && priceW ? rowGap : 0) + priceW;
 
-  // --- Step 1d: barcode (directly below the text, no gap) ----------------
-  const barCanvas = renderBarcodeCanvas(barcode, widthPx);
+    let rowX = (widthPx - rowW) / 2;
+    if (skuText) {
+      ctx.font = `400 ${skuFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+      ctx.fillText(skuText, rowX, cursorY);
+      rowX += skuW + rowGap;
+    }
+    if (priceText) {
+      ctx.font = `900 ${priceFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+      ctx.fillText(priceText, rowX, cursorY);
+    }
+    cursorY += priceRowH;
+  }
+
+  // --- PASS 2: barcode (flush under the text row) ------------------------
   if (barCanvas) {
+    cursorY += gapPriceBar;
     const maxBarWidth = widthPx - padX * 2;
-    // Scale to fill the available width; height follows the natural aspect
-    // ratio so bar proportions stay correct. No bottom anchoring — the barcode
-    // sits flush under the SKU/price row to eliminate dead space.
-    const remaining = heightPx - cursorY - Math.round(heightPx * 0.02);
-    const maxBarHeight = Math.max(10, remaining);
-    const scale = Math.min(maxBarWidth / barCanvas.width, maxBarHeight / barCanvas.height);
+    const scale = maxBarWidth / barCanvas.width;
     const drawW = Math.floor(barCanvas.width * scale);
     const drawH = Math.floor(barCanvas.height * scale);
     const dx = Math.floor((widthPx - drawW) / 2);
-    const dy = Math.floor(cursorY);
-    ctx.drawImage(barCanvas, dx, dy, drawW, drawH);
+    ctx.drawImage(barCanvas, dx, cursorY, drawW, drawH);
   }
 
   // --- Step 2 + 3: threshold + pack to 1-bit bytes ------------------------

@@ -161,7 +161,8 @@ mod win {
         let name_w = to_wide(printer_name);
 
         // PRINTER_DEFAULTSW: only DesiredAccess matters here; null datatype/devmode.
-        let mut defaults = PRINTER_DEFAULTSW {
+        // Passed by const reference to OpenPrinterW, so no `mut` needed.
+        let defaults = PRINTER_DEFAULTSW {
             pDatatype: std::ptr::null_mut(),
             pDevMode: std::ptr::null_mut(),
             DesiredAccess: PRINTER_ACCESS_USE,
