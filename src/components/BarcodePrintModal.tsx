@@ -16,9 +16,9 @@ interface BarcodePrintModalProps {
 const fmt = (n: number) =>
   `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DA`;
 
-const SIZES: Record<PaperSize, { w: number; h: number; printW: number; printH: number; label: string; nameFont: string; skuFont: string; priceFont: string; barWidth: number; barHeight: number; barFont: number; showBarText: boolean }> = {
-  medium: { w: 45, h: 35, printW: 42, printH: 33, label: '35×45mm', nameFont: '9px', skuFont: '6.5px', priceFont: '10px', barWidth: 1.1, barHeight: 28, barFont: 8, showBarText: true },
-  small:  { w: 40, h: 20, printW: 37, printH: 18, label: '20×40mm', nameFont: '6.5px', skuFont: '5px', priceFont: '7px', barWidth: 0.9, barHeight: 14, barFont: 6, showBarText: false },
+const SIZES: Record<PaperSize, { w: number; h: number; label: string; nameFont: string; skuFont: string; priceFont: string; barWidth: number; barHeight: number; barFont: number; showBarText: boolean }> = {
+  medium: { w: 45, h: 35, label: '35×45mm', nameFont: '9px', skuFont: '6.5px', priceFont: '10px', barWidth: 1.4, barHeight: 100, barFont: 9, showBarText: true },
+  small:  { w: 40, h: 20, label: '20×40mm', nameFont: '6.5px', skuFont: '5px', priceFont: '7px', barWidth: 1, barHeight: 65, barFont: 7, showBarText: false },
 };
 
 export default function BarcodePrintModal({ barcode, productName, sku, price, onClose }: BarcodePrintModalProps) {
@@ -63,19 +63,13 @@ export default function BarcodePrintModal({ barcode, productName, sku, price, on
           body * { visibility: hidden !important; }
           .barcode-print-area, .barcode-print-area * { visibility: visible !important; }
           .barcode-print-area {
-            display: flex !important;
-            flex-direction: column !important;
-            align-items: center !important;
-            justify-content: center !important;
             position: fixed !important;
             left: 0 !important;
             top: 0 !important;
-            width: ${s.printW}mm !important;
-            height: ${s.printH}mm !important;
-            margin: 1mm !important;
+            width: ${s.w}mm !important;
+            height: ${s.h}mm !important;
             background: white !important;
             color: #000 !important;
-            text-align: center !important;
             overflow: hidden !important;
           }
           .barcode-no-print { display: none !important; }
@@ -109,14 +103,34 @@ export default function BarcodePrintModal({ barcode, productName, sku, price, on
           </div>
         </div>
 
-        <div className="barcode-print-area">
-          <p style={{ fontSize: s.nameFont, fontWeight: 900, lineHeight: 1.1, margin: 0 }} className="text-text-primary">{productName}</p>
-          {sku && <p style={{ fontSize: s.skuFont, margin: '0.3mm 0 0 0' }} className="text-text-muted">SKU: {sku}</p>}
-          {price != null && price > 0 && (
-            <p style={{ fontSize: s.priceFont, fontWeight: 900, margin: '0.3mm 0 0 0' }} className="text-navy">{fmt(price)}</p>
-          )}
-          <div style={{ marginTop: '0.5mm' }}>
-            <svg ref={svgRef} style={{ maxWidth: `${s.printW - 2}mm`, display: 'block' }} />
+        <div className="barcode-print-area" style={{ display: 'flex', flexDirection: 'row', alignItems: 'stretch' }}>
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            alignItems: 'center',
+            width: '30%',
+            padding: '0.5mm',
+          }}>
+            <p style={{ fontSize: s.nameFont, fontWeight: 900, lineHeight: 1.1, margin: 0, textAlign: 'center', wordBreak: 'break-word' }} className="text-text-primary">{productName}</p>
+            {sku && <p style={{ fontSize: s.skuFont, margin: '0.3mm 0 0 0', textAlign: 'center' }} className="text-text-muted">SKU: {sku}</p>}
+            {price != null && price > 0 && (
+              <p style={{ fontSize: s.priceFont, fontWeight: 900, margin: '0.3mm 0 0 0', textAlign: 'center' }} className="text-navy">{fmt(price)}</p>
+            )}
+          </div>
+          <div style={{
+            width: '70%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              transform: 'rotate(-90deg)',
+              transformOrigin: 'center center',
+            }}>
+              <svg ref={svgRef} style={{ display: 'block' }} />
+            </div>
           </div>
         </div>
       </div>

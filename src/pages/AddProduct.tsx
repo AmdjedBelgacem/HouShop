@@ -59,12 +59,6 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
     for (let i = 0; i < 12; i++) {
       digits.push(Math.floor(Math.random() * 10));
     }
-    let sum = 0;
-    for (let i = 0; i < 12; i++) {
-      sum += digits[i] * (i % 2 === 0 ? 1 : 3);
-    }
-    const check = (10 - (sum % 10)) % 10;
-    digits.push(check);
     return digits.join('');
   }
 
