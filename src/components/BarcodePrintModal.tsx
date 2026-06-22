@@ -16,14 +16,17 @@ interface BarcodePrintModalProps {
 const fmt = (n: number) =>
   `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DA`;
 
-// Medium: 35mm × 45mm portrait. Barcode footprint:
-//   width = 95 * 1.2 * 0.2646 + 2*(6*0.2646) = 30.2 + 3.2 = ~33.4mm -> fits in 35mm with 0.8mm quiet zone each side
-//   barHeight 50px * 0.2646 = 13.2mm + margin ~16.4mm -> fits in 45mm with text above
-// Small: 50mm × 100mm (2×4" thermal label). Barcode footprint:
-//   width = 95 * 1.8 * 0.2646 + 2*(6*0.2646) = 45.3 + 3.2 = ~48.5mm -> fits in 50mm with quiet zone
-//   barHeight 60px * 0.2646 = 15.9mm + margin ~19mm -> fits easily in 100mm with text above
+// EAN-13 module math: barcode width (px) = 95 * barWidth + 2 * margin(6).
+// At 96 DPI, 1px = 0.2646mm.
+//
+// Medium: 35mm × 45mm portrait.
+//   barcode px = 95 * 1.15 + 12 = 121.25px -> 32.1mm, fits 35mm with ~1.5mm quiet zone each side.
+//   barHeight 55px -> 14.6mm; ~8mm name + ~4mm price row + 14.6mm bar + ~3mm gap = ~29.6mm, fits 45mm.
+// Small: 50mm × 100mm (2×4" thermal label).
+//   barcode px = 95 * 1.8 + 12 = 183px -> 48.4mm, fits 50mm with quiet zone.
+//   barHeight 60px -> 15.9mm; plenty of vertical room in 100mm.
 const SIZES: Record<PaperSize, { w: number; h: number; label: string; nameFont: string; skuFont: string; priceFont: string; barWidth: number; barHeight: number; barFont: number; showBarText: boolean }> = {
-  medium: { w: 35, h: 45, label: '35×45mm', nameFont: '9px', skuFont: '6.5px', priceFont: '10px', barWidth: 1.2, barHeight: 50, barFont: 9, showBarText: true },
+  medium: { w: 35, h: 45, label: '35×45mm', nameFont: '9px', skuFont: '6.5px', priceFont: '10px', barWidth: 1.15, barHeight: 55, barFont: 9, showBarText: true },
   small:  { w: 50, h: 100, label: '2×4"', nameFont: '12px', skuFont: '9px', priceFont: '14px', barWidth: 1.8, barHeight: 60, barFont: 11, showBarText: true },
 };
 
@@ -77,13 +80,17 @@ export default function BarcodePrintModal({ barcode, productName, sku, price, on
           margin: 0;
         }
         @media print {
-          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; box-sizing: border-box !important; }
           html, body {
             width: ${s.w}mm !important;
             height: ${s.h}mm !important;
             margin: 0 !important;
             padding: 0 !important;
             overflow: hidden !important;
+            /* Force LTR in print: the app sets dir=rtl for Arabic, which shifts the
+               centered barcode toward the right edge of the label. The label itself
+               is always LTR. */
+            direction: ltr !important;
           }
           body * { visibility: hidden !important; }
           .barcode-print-area, .barcode-print-area * { visibility: visible !important; }
@@ -96,6 +103,7 @@ export default function BarcodePrintModal({ barcode, productName, sku, price, on
             background: white !important;
             color: #000 !important;
             overflow: hidden !important;
+            direction: ltr !important;
           }
           .barcode-no-print { display: none !important; }
         }
@@ -135,9 +143,35 @@ export default function BarcodePrintModal({ barcode, productName, sku, price, on
           </div>
         )}
 
-        <div className="barcode-print-area" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: `${s.h}mm` }}>
-          <p style={{ fontSize: s.nameFont, fontWeight: 900, lineHeight: 1.1, margin: 0, textAlign: 'center', width: '100%', maxWidth: `${s.w}mm`, wordBreak: 'break-word' }} className="text-text-primary">{productName}</p>
-          <div style={{ display: 'flex', gap: '2mm', alignItems: 'center' }}>
+        <div
+          className="barcode-print-area"
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: `${s.w}mm`,
+            height: `${s.h}mm`,
+            boxSizing: 'border-box',
+            direction: 'ltr',
+          }}
+        >
+          <p
+            style={{
+              fontSize: s.nameFont,
+              fontWeight: 900,
+              lineHeight: 1.1,
+              margin: 0,
+              textAlign: 'center',
+              width: '100%',
+              padding: '0 1.5mm',
+              wordBreak: 'break-word',
+            }}
+            className="text-text-primary"
+          >
+            {productName}
+          </p>
+          <div style={{ display: 'flex', gap: '2mm', alignItems: 'center', marginTop: '0.5mm' }}>
             {sku && <p style={{ fontSize: s.skuFont, margin: 0 }} className="text-text-muted">SKU: {sku}</p>}
             {price != null && price > 0 && (
               <p style={{ fontSize: s.priceFont, fontWeight: 900, margin: 0 }} className="text-navy">{fmt(price)}</p>
