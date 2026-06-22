@@ -16,15 +16,15 @@ interface BarcodePrintModalProps {
 const fmt = (n: number) =>
   `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DA`;
 
-// Medium: unrotated. Barcode footprint:
-//   width = 95 * 1.1 * 0.2646 + 2*(6*0.2646) = 27.6 + 3.2 = ~31mm -> along 45mm axis (fits)
-//   barHeight 50px * 0.2646 = 13.2mm + 2*(6*0.2646) margin = ~16.4mm -> height on 35mm axis (fits with text above)
-// Small: unrotated. Barcode footprint:
-//   width ~31mm -> along 40mm axis (fits)
-//   barHeight 50px * 0.2646 = 13.2mm + top(2)+bottom(2) margin = ~14.3mm -> height on 20mm axis (fits with text above)
+// Medium: portrait (35mm wide × 45mm tall). Barcode footprint:
+//   width = 95 * 1.3 * 0.2646 + 2*(6*0.2646) = 32.7 + 3.2 = ~36mm -> tight fit in 35mm, bars extend to edge (ok)
+//   barHeight 50px * 0.2646 = 13.2mm + margin ~16.4mm -> height on 45mm axis (plenty of room for text above)
+// Small: portrait (20mm wide × 40mm tall). Barcode footprint:
+//   width = 95 * 0.7 * 0.2646 + 2*(6*0.2646) = 17.6 + 3.2 = ~20.8mm -> along 20mm axis (tight but fits)
+//   barHeight 40px * 0.2646 = 10.6mm + margin ~11.6mm -> height on 40mm axis (plenty of room for text above)
 const SIZES: Record<PaperSize, { w: number; h: number; label: string; nameFont: string; skuFont: string; priceFont: string; barWidth: number; barHeight: number; barFont: number; showBarText: boolean }> = {
-  medium: { w: 45, h: 35, label: '35×45mm', nameFont: '9px', skuFont: '6.5px', priceFont: '10px', barWidth: 1.1, barHeight: 50, barFont: 9, showBarText: true },
-  small:  { w: 40, h: 20, label: '20×40mm', nameFont: '6.5px', skuFont: '5px', priceFont: '7px', barWidth: 1.1, barHeight: 50, barFont: 7, showBarText: false },
+  medium: { w: 35, h: 45, label: '35×45mm', nameFont: '9px', skuFont: '6.5px', priceFont: '10px', barWidth: 1.3, barHeight: 50, barFont: 9, showBarText: true },
+  small:  { w: 20, h: 40, label: '20×40mm', nameFont: '6.5px', skuFont: '5px', priceFont: '7px', barWidth: 0.7, barHeight: 40, barFont: 7, showBarText: false },
 };
 
 function isValidEan13Input(value: string): boolean {
