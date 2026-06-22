@@ -16,15 +16,15 @@ interface BarcodePrintModalProps {
 const fmt = (n: number) =>
   `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DA`;
 
-// Medium: portrait (35mm wide × 45mm tall). Barcode footprint:
-//   width = 95 * 1.3 * 0.2646 + 2*(6*0.2646) = 32.7 + 3.2 = ~36mm -> tight fit in 35mm, bars extend to edge (ok)
-//   barHeight 50px * 0.2646 = 13.2mm + margin ~16.4mm -> height on 45mm axis (plenty of room for text above)
-// Small: portrait (20mm wide × 40mm tall). Barcode footprint:
-//   width = 95 * 0.7 * 0.2646 + 2*(6*0.2646) = 17.6 + 3.2 = ~20.8mm -> along 20mm axis (tight but fits)
-//   barHeight 40px * 0.2646 = 10.6mm + margin ~11.6mm -> height on 40mm axis (plenty of room for text above)
+// Medium: 35mm × 45mm portrait. Barcode footprint:
+//   width = 95 * 1.2 * 0.2646 + 2*(6*0.2646) = 30.2 + 3.2 = ~33.4mm -> fits in 35mm with 0.8mm quiet zone each side
+//   barHeight 50px * 0.2646 = 13.2mm + margin ~16.4mm -> fits in 45mm with text above
+// Small: 50mm × 100mm (2×4" thermal label). Barcode footprint:
+//   width = 95 * 1.8 * 0.2646 + 2*(6*0.2646) = 45.3 + 3.2 = ~48.5mm -> fits in 50mm with quiet zone
+//   barHeight 60px * 0.2646 = 15.9mm + margin ~19mm -> fits easily in 100mm with text above
 const SIZES: Record<PaperSize, { w: number; h: number; label: string; nameFont: string; skuFont: string; priceFont: string; barWidth: number; barHeight: number; barFont: number; showBarText: boolean }> = {
-  medium: { w: 35, h: 45, label: '35×45mm', nameFont: '9px', skuFont: '6.5px', priceFont: '10px', barWidth: 1.3, barHeight: 50, barFont: 9, showBarText: true },
-  small:  { w: 20, h: 40, label: '20×40mm', nameFont: '6.5px', skuFont: '5px', priceFont: '7px', barWidth: 0.7, barHeight: 40, barFont: 7, showBarText: false },
+  medium: { w: 35, h: 45, label: '35×45mm', nameFont: '9px', skuFont: '6.5px', priceFont: '10px', barWidth: 1.2, barHeight: 50, barFont: 9, showBarText: true },
+  small:  { w: 50, h: 100, label: '2×4"', nameFont: '12px', skuFont: '9px', priceFont: '14px', barWidth: 1.8, barHeight: 60, barFont: 11, showBarText: true },
 };
 
 function isValidEan13Input(value: string): boolean {
@@ -49,19 +49,19 @@ export default function BarcodePrintModal({ barcode, productName, sku, price, on
 
     setBarcodeError(null);
     try {
-      const marginOpts = paper === 'small'
-        ? { marginTop: 2, marginBottom: 2, marginLeft: 6, marginRight: 6 }
-        : { margin: 6 };
       JsBarcode(svgRef.current, barcode, {
         format: 'EAN13',
         width: s.barWidth,
         height: s.barHeight,
         displayValue: s.showBarText,
         fontSize: s.barFont,
-        ...marginOpts,
+        margin: 6,
         background: '#ffffff',
         lineColor: '#000000',
       });
+      if (svgRef.current) {
+        svgRef.current.setAttribute('shape-rendering', 'crispEdges');
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown barcode error';
       setBarcodeError(msg);
@@ -143,8 +143,8 @@ export default function BarcodePrintModal({ barcode, productName, sku, price, on
               <p style={{ fontSize: s.priceFont, fontWeight: 900, margin: 0 }} className="text-navy">{fmt(price)}</p>
             )}
           </div>
-          <div style={{ marginTop: '0.5mm', overflow: 'hidden', display: 'flex', justifyContent: 'center' }}>
-            <svg ref={svgRef} style={{ display: 'block' }} />
+          <div style={{ marginTop: '1mm', display: 'flex', justifyContent: 'center' }}>
+            <svg ref={svgRef} style={{ display: 'block', shapeRendering: 'crispEdges' }} />
           </div>
         </div>
       </div>
