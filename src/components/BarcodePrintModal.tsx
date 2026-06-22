@@ -1,9 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
 import JsBarcode from 'jsbarcode';
 import { useI18n } from '../i18n';
-import { X, Printer, AlertTriangle } from 'lucide-react';
-
-type PaperSize = 'medium' | 'small';
+import { X, Printer, AlertTriangle, RefreshCw, Loader2 } from 'lucide-react';
+import {
+  PAPER_PRESETS,
+  getSavedPrinter,
+  setSavedPrinter,
+  listPrinters,
+  printLabel,
+  type PaperPreset,
+} from '../lib/tsplPrinter';
 
 interface BarcodePrintModalProps {
   barcode: string;
@@ -13,177 +19,304 @@ interface BarcodePrintModalProps {
   onClose: () => void;
 }
 
-const fmt = (n: number) =>
-  `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DA`;
-
-// EAN-13 module math: barcode width (px) = 95 * barWidth + 2 * margin(6).
-// At 96 DPI, 1px = 0.2646mm.
-//
-// Medium: 35mm × 45mm portrait. Layout distributes content across the full
-// label height (name at top, barcode at bottom) so there's no wasted white
-// space; barcode height stays small.
-//   barcode px = 95 * 1.15 + 12 = 121.25px -> 32.1mm, fits 35mm with ~1.5mm quiet zone each side.
-//   barHeight 50px -> 13.2mm.
-// Small: 50mm × 100mm (2×4" thermal label).
-//   barcode px = 95 * 1.8 + 12 = 183px -> 48.4mm, fits 50mm with quiet zone.
-//   barHeight 60px -> 15.9mm.
-const SIZES: Record<PaperSize, { w: number; h: number; label: string; nameFont: string; skuFont: string; priceFont: string; barWidth: number; barHeight: number; barFont: number; showBarText: boolean }> = {
-  medium: { w: 35, h: 45, label: '35×45mm', nameFont: '9px', skuFont: '6.5px', priceFont: '10px', barWidth: 1.15, barHeight: 50, barFont: 9, showBarText: true },
-  small:  { w: 50, h: 100, label: '2×4"', nameFont: '12px', skuFont: '9px', priceFont: '14px', barWidth: 1.8, barHeight: 60, barFont: 11, showBarText: true },
-};
-
 function isValidEan13Input(value: string): boolean {
   return /^\d{12,13}$/.test(value);
 }
 
 export default function BarcodePrintModal({ barcode, productName, sku, price, onClose }: BarcodePrintModalProps) {
   const { t } = useI18n();
-  const [paper, setPaper] = useState<PaperSize>('medium');
-  const [barcodeError, setBarcodeError] = useState<string | null>(null);
+  const [paperKey, setPaperKey] = useState<PaperPreset['key']>('medium');
+  const [printers, setPrinters] = useState<string[]>([]);
+  const [printerName, setPrinterName] = useState<string>('');
+  const [tunables, setTunables] = useState({ density: 8, direction: 0, shift: 0 });
+  const [loadingPrinters, setLoadingPrinters] = useState(false);
+  const [printing, setPrinting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
-  const s = SIZES[paper];
 
+  const paper = PAPER_PRESETS.find(p => p.key === paperKey)!;
+
+  // Derived: barcode validity (no setState-in-effect needed).
+  const barcodeError =
+    !barcode || !isValidEan13Input(barcode)
+      ? `Invalid barcode: "${barcode}". Must be 12-13 digits.`
+      : null;
+
+  // Derived: full TSPL options = user tunables + paper geometry.
+  const opts = {
+    density: tunables.density,
+    direction: tunables.direction,
+    shift: tunables.shift,
+    labelWidthMm: paper.widthMm,
+    labelHeightMm: paper.heightMm,
+    gapMm: paper.gapMm,
+  };
+
+  // Live preview only: draw EAN-13 into the SVG. The printed bitmap is rendered
+  // separately in labelRenderer.ts, so this is purely for the on-screen preview.
   useEffect(() => {
-    if (!svgRef.current) return;
-
-    if (!barcode || !isValidEan13Input(barcode)) {
-      setBarcodeError(`Invalid barcode: "${barcode}". Must be 12-13 digits.`);
-      svgRef.current.innerHTML = '';
+    if (!svgRef.current || barcodeError) {
+      if (svgRef.current) svgRef.current.innerHTML = '';
       return;
     }
-
-    setBarcodeError(null);
     try {
       JsBarcode(svgRef.current, barcode, {
         format: 'EAN13',
-        width: s.barWidth,
-        height: s.barHeight,
-        displayValue: s.showBarText,
-        fontSize: s.barFont,
-        margin: 6,
+        width: 1.15,
+        height: 50,
+        displayValue: true,
+        fontSize: 9,
+        margin: 4,
         background: '#ffffff',
         lineColor: '#000000',
       });
-      if (svgRef.current) {
-        svgRef.current.setAttribute('shape-rendering', 'crispEdges');
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown barcode error';
-      setBarcodeError(msg);
+      svgRef.current.setAttribute('shape-rendering', 'crispEdges');
+    } catch {
       if (svgRef.current) svgRef.current.innerHTML = '';
     }
-  }, [barcode, paper]);
+  }, [barcode, barcodeError]);
+
+  // Load the printer list once on mount.
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoadingPrinters(true);
+      setError(null);
+      try {
+        const list = await listPrinters();
+        if (cancelled) return;
+        setPrinters(list);
+        const saved = getSavedPrinter();
+        if (saved && list.includes(saved)) {
+          setPrinterName(saved);
+        } else if (list.length > 0) {
+          setPrinterName(list[0]);
+        }
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!cancelled) setLoadingPrinters(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  async function refreshPrinters() {
+    setLoadingPrinters(true);
+    setError(null);
+    try {
+      const list = await listPrinters();
+      setPrinters(list);
+      const saved = getSavedPrinter();
+      if (saved && list.includes(saved)) {
+        setPrinterName(saved);
+      } else if (list.length > 0) {
+        setPrinterName(list[0]);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoadingPrinters(false);
+    }
+  }
+
+  function onPickPrinter(name: string) {
+    setPrinterName(name);
+    setSavedPrinter(name);
+  }
+
+  async function onPrint() {
+    setError(null);
+    if (barcodeError) {
+      setError(barcodeError);
+      return;
+    }
+    setPrinting(true);
+    try {
+      await printLabel(
+        printerName,
+        { barcode, productName, sku, price },
+        paper,
+        opts,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPrinting(false);
+    }
+  }
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[200]" onClick={onClose}>
-      <style>{`
-        @page {
-          size: ${s.w}mm ${s.h}mm;
-          margin: 0;
-        }
-        @media print {
-          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; box-sizing: border-box !important; }
-          html, body {
-            width: ${s.w}mm !important;
-            height: ${s.h}mm !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            overflow: hidden !important;
-            /* Force LTR in print: the app sets dir=rtl for Arabic, which shifts the
-               centered barcode toward the right edge of the label. The label itself
-               is always LTR. */
-            direction: ltr !important;
-          }
-          body * { visibility: hidden !important; }
-          .barcode-print-area, .barcode-print-area * { visibility: visible !important; }
-          .barcode-print-area {
-            position: fixed !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: ${s.w}mm !important;
-            height: ${s.h}mm !important;
-            background: white !important;
-            color: #000 !important;
-            overflow: hidden !important;
-            direction: ltr !important;
-          }
-          .barcode-no-print { display: none !important; }
-        }
-      `}</style>
-
       <div
-        className="bg-card rounded-2xl w-full max-w-[400px] shadow-2xl overflow-hidden"
+        className="bg-card rounded-2xl w-full max-w-[420px] shadow-2xl overflow-hidden"
         onClick={e => e.stopPropagation()}
       >
-        <div className="barcode-no-print flex items-center justify-between px-5 py-3 border-b border-border">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border">
           <h3 className="text-[14px] font-bold text-text-primary">{t('barcode.title')}</h3>
-          <div className="flex items-center gap-2">
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-surface text-text-muted transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-3">
+          {/* Errors */}
+          {error && (
+            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-50 border border-red-200">
+              <AlertTriangle size={14} className="text-accent-red flex-shrink-0 mt-0.5" />
+              <p className="text-[11px] text-accent-red font-medium">{error}</p>
+            </div>
+          )}
+          {barcodeError && (
+            <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-red-50 border border-red-200">
+              <AlertTriangle size={14} className="text-accent-red flex-shrink-0 mt-0.5" />
+              <p className="text-[11px] text-accent-red font-medium">{barcodeError}</p>
+            </div>
+          )}
+
+          {/* Preview */}
+          <div className="flex justify-center bg-surface rounded-xl py-4 border border-border">
+            <svg ref={svgRef} style={{ display: 'block', shapeRendering: 'crispEdges', maxHeight: 90 }} />
+          </div>
+
+          {/* Printer selector */}
+          <div>
+            <label className="block text-[11px] font-semibold text-text-secondary mb-1">
+              Printer (RAW)
+            </label>
+            <div className="flex gap-1.5">
+              <select
+                value={printerName}
+                onChange={e => onPickPrinter(e.target.value)}
+                disabled={loadingPrinters || printing}
+                className="flex-1 min-w-0 bg-surface border border-border rounded-lg px-2.5 py-1.5 text-[12px] text-text-primary focus:outline-none focus:ring-1 focus:ring-navy"
+              >
+                {printers.length === 0 && !loadingPrinters && (
+                  <option value="">No printers found</option>
+                )}
+                {printers.map(name => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+              <button
+                onClick={refreshPrinters}
+                disabled={loadingPrinters || printing}
+                title="Refresh printer list"
+                className="p-1.5 rounded-lg border border-border bg-surface text-text-secondary hover:bg-card transition-colors disabled:opacity-50"
+              >
+                <RefreshCw size={14} className={loadingPrinters ? 'animate-spin' : ''} />
+              </button>
+            </div>
+          </div>
+
+          {/* Paper size */}
+          <div>
+            <label className="block text-[11px] font-semibold text-text-secondary mb-1">
+              Paper size
+            </label>
             <div className="flex items-center gap-1 bg-surface rounded-lg border border-border p-0.5">
-              {(Object.keys(SIZES) as PaperSize[]).map(key => (
-                <button key={key} onClick={() => setPaper(key)}
-                  className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
-                    paper === key ? 'bg-navy text-white' : 'text-text-secondary hover:bg-card'
-                  }`}>
-                  {SIZES[key].label}
+              {PAPER_PRESETS.map(p => (
+                <button
+                  key={p.key}
+                  onClick={() => setPaperKey(p.key)}
+                  className={`flex-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                    paperKey === p.key ? 'bg-navy text-white' : 'text-text-secondary hover:bg-card'
+                  }`}
+                >
+                  {p.label}
                 </button>
               ))}
             </div>
-            <button onClick={() => window.print()}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-navy text-white text-[12px] font-medium hover:bg-navy-light transition-colors">
-              <Printer size={13} /> {t('barcode.print')}
-            </button>
-            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-surface text-text-muted transition-colors">
-              <X size={16} />
-            </button>
           </div>
-        </div>
 
-        {barcodeError && (
-          <div className="barcode-no-print flex items-center gap-2 mx-5 mt-3 px-3 py-2 rounded-lg bg-red-50 border border-red-200">
-            <AlertTriangle size={14} className="text-accent-red flex-shrink-0" />
-            <p className="text-[11px] text-accent-red font-medium">{barcodeError}</p>
-          </div>
-        )}
-
-        <div
-          className="barcode-print-area"
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: `${s.w}mm`,
-            height: `${s.h}mm`,
-            boxSizing: 'border-box',
-            direction: 'ltr',
-          }}
-        >
-          <p
-            style={{
-              fontSize: s.nameFont,
-              fontWeight: 900,
-              lineHeight: 1.1,
-              margin: 0,
-              textAlign: 'center',
-              width: '100%',
-              padding: '0 1.5mm',
-              wordBreak: 'break-word',
-            }}
-            className="text-text-primary"
-          >
-            {productName}
-          </p>
-          <div style={{ display: 'flex', gap: '2mm', alignItems: 'center', marginTop: '0.3mm' }}>
-            {sku && <p style={{ fontSize: s.skuFont, margin: 0 }} className="text-text-muted">SKU: {sku}</p>}
-            {price != null && price > 0 && (
-              <p style={{ fontSize: s.priceFont, fontWeight: 900, margin: 0 }} className="text-navy">{fmt(price)}</p>
+          {/* Advanced tunables */}
+          <div>
+            <button
+              onClick={() => setShowAdvanced(v => !v)}
+              className="text-[11px] font-semibold text-navy hover:underline"
+            >
+              {showAdvanced ? '− Hide' : '+ Show'} advanced settings
+            </button>
+            {showAdvanced && (
+              <div className="grid grid-cols-3 gap-2 mt-2">
+                <NumberField
+                  label="Density"
+                  value={tunables.density}
+                  min={0}
+                  max={15}
+                  onChange={v => setTunables(o => ({ ...o, density: v }))}
+                  hint="0–15"
+                />
+                <NumberField
+                  label="Direction"
+                  value={tunables.direction}
+                  min={0}
+                  max={1}
+                  onChange={v => setTunables(o => ({ ...o, direction: v }))}
+                  hint="0 or 1"
+                />
+                <NumberField
+                  label="Shift"
+                  value={tunables.shift}
+                  min={-50}
+                  max={50}
+                  onChange={v => setTunables(o => ({ ...o, shift: v }))}
+                  hint="dots"
+                />
+              </div>
             )}
           </div>
-          <div style={{ marginTop: '0.5mm', display: 'flex', justifyContent: 'center' }}>
-            <svg ref={svgRef} style={{ display: 'block', shapeRendering: 'crispEdges' }} />
-          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border">
+          <button
+            onClick={onPrint}
+            disabled={printing || !!barcodeError || !printerName}
+            className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-navy text-white text-[12px] font-medium hover:bg-navy-light transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {printing ? <Loader2 size={13} className="animate-spin" /> : <Printer size={13} />}
+            {printing ? 'Printing…' : t('barcode.print')}
+          </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+  hint,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (v: number) => void;
+  hint?: string;
+}) {
+  return (
+    <div>
+      <label className="block text-[10px] font-medium text-text-muted mb-0.5">{label}</label>
+      <input
+        type="number"
+        value={value}
+        min={min}
+        max={max}
+        onChange={e => {
+          const n = Number(e.target.value);
+          if (Number.isFinite(n)) onChange(Math.max(min, Math.min(max, n)));
+        }}
+        className="w-full bg-surface border border-border rounded-md px-2 py-1 text-[11px] text-text-primary focus:outline-none focus:ring-1 focus:ring-navy"
+      />
+      {hint && <p className="text-[9px] text-text-muted mt-0.5">{hint}</p>}
     </div>
   );
 }

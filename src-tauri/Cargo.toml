@@ -28,3 +28,9 @@ thiserror = "2"
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+
+# Windows-only: RAW data injection to the printer via the Spooler API
+# (OpenPrinterW / StartDocPrinterW with pDatatype = "RAW" / WritePrinter).
+# Gated to cfg(windows) so the project still compiles on the macOS dev machine.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.59", features = ["Win32_Graphics_Printing", "Win32_Foundation"] }

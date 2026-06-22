@@ -1,0 +1,267 @@
+/**
+ * Label renderer: composes the barcode label onto a 1-bit monochromatic canvas
+ * and packs the pixel data into a byte stream the Rust `print_label` command
+ * expects (row-major, MSB-first, byte-aligned rows).
+ *
+ * Pipeline (Hybrid Direct RAW Graphics):
+ *   1. Draw to an offscreen <canvas> at the printer's native DPI.
+ *   2. Threshold every pixel against 128 → pure black or white (no AA, no dither).
+ *   3. Pack 8 horizontal pixels into one byte, MSB first, pad rows to a byte.
+ *
+ * The packed bytes are base64-encoded and forwarded to Rust, which wraps them
+ * in TSPL `BITMAP` commands and injects them via the Windows Spooler (RAW).
+ */
+
+import JsBarcode from 'jsbarcode';
+
+export interface RenderLabelInput {
+  barcode: string;
+  productName: string;
+  sku: string | null;
+  price?: number | null;
+  /** Canvas width in printer dots (e.g. 280 for 35mm @ 203 DPI). Must be a multiple of 8. */
+  widthPx: number;
+  /** Canvas height in printer dots (e.g. 360 for 45mm @ 203 DPI). */
+  heightPx: number;
+}
+
+export interface RenderedBitmap {
+  /** Base64-encoded packed 1-bit pixel data. */
+  packedBase64: string;
+  /** Bytes per row (== widthPx / 8). Forwarded to TSPL `BITMAP`. */
+  widthBytes: number;
+  /** Pixel width as drawn (echoed for the TSPL payload). */
+  widthPx: number;
+  /** Pixel height as drawn. */
+  heightPx: number;
+}
+
+const fmt = (n: number) =>
+  `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DA`;
+
+/**
+ * Word-wrap a string to fit `maxWidthPx` for the given font, breaking only on
+ * spaces. Lines that still overflow are hard-cut.
+ */
+function wrapLines(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidthPx: number,
+  maxLines: number,
+): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (ctx.measureText(candidate).width <= maxWidthPx || !current) {
+      current = candidate;
+    } else {
+      lines.push(current);
+      current = word;
+      if (lines.length >= maxLines) break;
+    }
+  }
+  if (current && lines.length < maxLines) lines.push(current);
+  // Hard-cut any overflowing tail line.
+  return lines.slice(0, maxLines).map(line => {
+    if (ctx.measureText(line).width <= maxWidthPx) return line;
+    let lo = 0;
+    let hi = line.length;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (ctx.measureText(line.slice(0, mid)).width <= maxWidthPx) lo = mid;
+      else hi = mid - 1;
+    }
+    return line.slice(0, lo);
+  });
+}
+
+/** Pick a font size (px) so the name fills the available width without overflowing. */
+function fitNameFont(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidthPx: number,
+  maxHeightPx: number,
+  maxLines: number,
+): { fontPx: number; lines: string[] } {
+  // Start near the design size and shrink until it fits.
+  let fontPx = Math.floor(maxHeightPx / maxLines / 1.15);
+  for (; fontPx >= 6; fontPx -= 1) {
+    ctx.font = `900 ${fontPx}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+    const lines = wrapLines(ctx, text, maxWidthPx, maxLines);
+    const totalHeight = lines.length * fontPx * 1.15;
+    const widest = Math.max(...lines.map(l => ctx.measureText(l).width));
+    if (totalHeight <= maxHeightPx && widest <= maxWidthPx) {
+      return { fontPx, lines };
+    }
+  }
+  ctx.font = `900 6px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  return { fontPx: 6, lines: wrapLines(ctx, text, maxWidthPx, maxLines) };
+}
+
+/**
+ * Render the EAN-13 barcode into its own offscreen canvas via JsBarcode.
+ * Returns null if the barcode is invalid (caller handles).
+ */
+function renderBarcodeCanvas(
+  barcode: string,
+  widthPx: number,
+): HTMLCanvasElement | null {
+  const canvas = document.createElement('canvas');
+  try {
+    JsBarcode(canvas, barcode, {
+      format: 'EAN13',
+      // Module width in printer dots. 95 modules + 2×6 quiet = ~107 modules
+      // of usable width; choose so the full barcode fits within `widthPx`
+      // while keeping modules on whole-pixel boundaries for crisp edges.
+      width: Math.max(1, Math.floor(widthPx / 115)),
+      height: 70,
+      displayValue: true,
+      fontSize: 16,
+      margin: 0,
+      background: '#ffffff',
+      lineColor: '#000000',
+    });
+  } catch {
+    return null;
+  }
+  return canvas;
+}
+
+/** Threshold-and-pack a canvas into a base64 1-bit byte string. */
+function packMonochrome(
+  ctx: CanvasRenderingContext2D,
+  widthPx: number,
+  heightPx: number,
+): { packedBase64: string; widthBytes: number } {
+  const { data } = ctx.getImageData(0, 0, widthPx, heightPx);
+  const widthBytes = Math.ceil(widthPx / 8);
+  const out = new Uint8Array(widthBytes * heightPx);
+
+  for (let y = 0; y < heightPx; y++) {
+    for (let bx = 0; bx < widthBytes; bx++) {
+      let byte = 0;
+      for (let bit = 0; bit < 8; bit++) {
+        const x = bx * 8 + bit;
+        let black = false;
+        if (x < widthPx) {
+          const i = (y * widthPx + x) * 4;
+          const lum = (data[i] + data[i + 1] + data[i + 2]) / 3;
+          // Hard threshold: < 128 → black. MSB is the leftmost pixel.
+          black = lum < 128;
+        }
+        // Padding bits for the last byte in a row are white (0).
+        byte = (byte << 1) | (black ? 1 : 0);
+      }
+      out[y * widthBytes + bx] = byte;
+    }
+  }
+
+  return { packedBase64: uint8ToBase64(out), widthBytes };
+}
+
+/** Base64-encode a Uint8Array without chunk-size limits. */
+function uint8ToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+/**
+ * Compose the label and return its packed 1-bit bitmap.
+ * Throws on invalid barcode / invalid dimensions.
+ */
+export function renderLabelToBitmap(input: RenderLabelInput): RenderedBitmap {
+  const { barcode, productName, sku, price, widthPx, heightPx } = input;
+  if (widthPx <= 0 || heightPx <= 0) {
+    throw new Error(`Invalid canvas dimensions ${widthPx}×${heightPx}`);
+  }
+  if (widthPx % 8 !== 0) {
+    throw new Error(`Canvas width must be a multiple of 8 (got ${widthPx})`);
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = widthPx;
+  canvas.height = heightPx;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) throw new Error('Failed to acquire 2D canvas context');
+
+  // --- Step 1a: white background, crisp settings ---------------------------
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, widthPx, heightPx);
+  ctx.fillStyle = '#000000';
+  ctx.textBaseline = 'top';
+  ctx.imageSmoothingEnabled = false;
+
+  const padX = Math.max(4, Math.round(widthPx * 0.03));
+
+  // --- Step 1b: product name (top, fitted + wrapped) ----------------------
+  let cursorY = padX;
+  const nameMaxWidth = widthPx - padX * 2;
+  const { fontPx: nameFont, lines: nameLines } = fitNameFont(
+    ctx,
+    productName || '',
+    nameMaxWidth,
+    Math.round(heightPx * 0.22),
+    2,
+  );
+  ctx.font = `900 ${nameFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  const nameLineHeight = nameFont * 1.15;
+  for (const line of nameLines) {
+    ctx.fillText(line, (widthPx - ctx.measureText(line).width) / 2, cursorY);
+    cursorY += nameLineHeight;
+  }
+
+  // --- Step 1c: SKU + price row ------------------------------------------
+  cursorY += Math.round(heightPx * 0.01);
+  const priceText = price != null && price > 0 ? fmt(price) : '';
+  const skuText = sku ? `SKU: ${sku}` : '';
+  const rowGap = Math.round(widthPx * 0.02);
+  const skuFont = Math.max(7, Math.round(widthPx * 0.04));
+  const priceFont = Math.max(9, Math.round(widthPx * 0.055));
+
+  // Measure both segments to center the combined row.
+  ctx.font = `400 ${skuFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  const skuW = skuText ? ctx.measureText(skuText).width : 0;
+  ctx.font = `900 ${priceFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  const priceW = priceText ? ctx.measureText(priceText).width : 0;
+  const rowW = skuW + (skuW && priceW ? rowGap : 0) + priceW;
+
+  let rowX = (widthPx - rowW) / 2;
+  if (skuText) {
+    ctx.font = `400 ${skuFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+    ctx.fillText(skuText, rowX, cursorY);
+    rowX += skuW + rowGap;
+  }
+  if (priceText) {
+    ctx.font = `900 ${priceFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+    ctx.fillText(priceText, rowX, cursorY);
+  }
+  cursorY += priceFont * 1.2;
+
+  // --- Step 1d: barcode (bottom, centered, scaled to fit width) ----------
+  const barCanvas = renderBarcodeCanvas(barcode, widthPx);
+  if (barCanvas) {
+    const maxBarWidth = widthPx - padX * 2;
+    // Fill the remaining vertical space; the natural canvas aspect ratio
+    // keeps bar proportions correct.
+    const maxBarHeight = heightPx - cursorY - Math.round(heightPx * 0.02);
+    if (maxBarHeight > 10) {
+      const scale = Math.min(maxBarWidth / barCanvas.width, maxBarHeight / barCanvas.height);
+      const drawW = Math.floor(barCanvas.width * scale);
+      const drawH = Math.floor(barCanvas.height * scale);
+      const dx = Math.floor((widthPx - drawW) / 2);
+      const dy = Math.floor((heightPx - drawH - Math.round(heightPx * 0.01)));
+      ctx.drawImage(barCanvas, dx, dy, drawW, drawH);
+    }
+  }
+
+  // --- Step 2 + 3: threshold + pack to 1-bit bytes ------------------------
+  const { packedBase64, widthBytes } = packMonochrome(ctx, widthPx, heightPx);
+
+  return { packedBase64, widthBytes, widthPx, heightPx };
+}
