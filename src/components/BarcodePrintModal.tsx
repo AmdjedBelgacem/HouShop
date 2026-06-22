@@ -19,15 +19,17 @@ const fmt = (n: number) =>
 // EAN-13 module math: barcode width (px) = 95 * barWidth + 2 * margin(6).
 // At 96 DPI, 1px = 0.2646mm.
 //
-// Medium: 35mm × 45mm portrait.
+// Medium: 35mm × 45mm portrait. Top text block (~name + price) ≈ 10-12mm,
+// leaving ~33mm for the barcode, which is anchored to the bottom of the label
+// via flex-grow so there's no wasted vertical space.
 //   barcode px = 95 * 1.15 + 12 = 121.25px -> 32.1mm, fits 35mm with ~1.5mm quiet zone each side.
-//   barHeight 55px -> 14.6mm; ~8mm name + ~4mm price row + 14.6mm bar + ~3mm gap = ~29.6mm, fits 45mm.
-// Small: 50mm × 100mm (2×4" thermal label).
+//   barHeight 110px -> 29.1mm; ~12mm text + 29.1mm bar = ~41mm, fills 45mm label.
+// Small: 50mm × 100mm (2×4" thermal label). Top text ≈ 16mm, leaving ~84mm.
 //   barcode px = 95 * 1.8 + 12 = 183px -> 48.4mm, fits 50mm with quiet zone.
-//   barHeight 60px -> 15.9mm; plenty of vertical room in 100mm.
+//   barHeight 200px -> 52.9mm; ~16mm text + 52.9mm bar = ~69mm, fills the 100mm label.
 const SIZES: Record<PaperSize, { w: number; h: number; label: string; nameFont: string; skuFont: string; priceFont: string; barWidth: number; barHeight: number; barFont: number; showBarText: boolean }> = {
-  medium: { w: 35, h: 45, label: '35×45mm', nameFont: '9px', skuFont: '6.5px', priceFont: '10px', barWidth: 1.15, barHeight: 55, barFont: 9, showBarText: true },
-  small:  { w: 50, h: 100, label: '2×4"', nameFont: '12px', skuFont: '9px', priceFont: '14px', barWidth: 1.8, barHeight: 60, barFont: 11, showBarText: true },
+  medium: { w: 35, h: 45, label: '35×45mm', nameFont: '9px', skuFont: '6.5px', priceFont: '10px', barWidth: 1.15, barHeight: 110, barFont: 9, showBarText: true },
+  small:  { w: 50, h: 100, label: '2×4"', nameFont: '12px', skuFont: '9px', priceFont: '14px', barWidth: 1.8, barHeight: 200, barFont: 11, showBarText: true },
 };
 
 function isValidEan13Input(value: string): boolean {
@@ -149,11 +151,12 @@ export default function BarcodePrintModal({ barcode, productName, sku, price, on
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
-            justifyContent: 'center',
+            justifyContent: 'flex-start',
             width: `${s.w}mm`,
             height: `${s.h}mm`,
             boxSizing: 'border-box',
             direction: 'ltr',
+            paddingTop: '1mm',
           }}
         >
           <p
@@ -177,7 +180,7 @@ export default function BarcodePrintModal({ barcode, productName, sku, price, on
               <p style={{ fontSize: s.priceFont, fontWeight: 900, margin: 0 }} className="text-navy">{fmt(price)}</p>
             )}
           </div>
-          <div style={{ marginTop: '1mm', display: 'flex', justifyContent: 'center' }}>
+          <div style={{ marginTop: '1mm', flex: 1, minHeight: 0, width: '100%', display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
             <svg ref={svgRef} style={{ display: 'block', shapeRendering: 'crispEdges' }} />
           </div>
         </div>
