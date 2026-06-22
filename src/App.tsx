@@ -35,26 +35,7 @@ function AppContent() {
   const [scannedVariant, setScannedVariant] = useState<ProductVariant | null>(null);
 
   const handleScan = useCallback((lookup: BarcodeLookup) => {
-    // BarcodeLookup flattens the product fields to the top level via serde
-    // #[serde(flatten)]; rebuild a Product for Checkout and forward the matched
-    // variant (if any) so it can be auto-selected instead of re-picking.
-    const product: Product = {
-      id: lookup.id,
-      name: lookup.name,
-      category_id: lookup.category_id,
-      category_name: lookup.category_name,
-      quantity: lookup.quantity,
-      cost_price: lookup.cost_price,
-      selling_price: lookup.selling_price,
-      barcode: lookup.barcode,
-      image_path: lookup.image_path,
-      description: lookup.description,
-      sku: lookup.sku,
-      low_stock_threshold: lookup.low_stock_threshold,
-      created_at: lookup.created_at,
-      updated_at: lookup.updated_at,
-    };
-    setScannedProduct(product);
+    setScannedProduct(lookup.product);
     setScannedVariant(lookup.variant);
     setCurrentPage('pos');
   }, []);

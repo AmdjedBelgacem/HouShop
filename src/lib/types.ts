@@ -214,22 +214,10 @@ export interface ProductVariant {
 /**
  * Result of a barcode lookup. `variant` is set when the scanned barcode belongs
  * to a specific variant (not the product itself), so checkout can auto-select it.
+ * `product` is nested to keep the IPC JSON shape simple and stable.
  */
 export interface BarcodeLookup {
-  id: number;
-  name: string;
-  category_id: number | null;
-  category_name: string | null;
-  quantity: number;
-  cost_price: number;
-  selling_price: number;
-  barcode: string | null;
-  image_path: string | null;
-  description: string | null;
-  sku: string | null;
-  low_stock_threshold: number;
-  created_at: string;
-  updated_at: string;
+  product: Product;
   variant: ProductVariant | null;
 }
 export interface CreateVariant {

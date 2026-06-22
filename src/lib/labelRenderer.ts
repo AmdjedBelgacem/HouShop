@@ -236,7 +236,11 @@ function drawLabel(
   style: Required<LabelStyling>,
 ) {
   const { barcode, productName, variantName, price, widthPx, heightPx } = input;
-  const shiftX = Math.round(input.shiftX ?? 0);
+  // Base offset of -40 dots compensates for this Xprinter's printhead-to-label
+  // registration offset (content prints ~5mm right of center at 203 DPI). The
+  // user-facing H-Shift control is relative to this base, so UI value 0 already
+  // includes the correction. Effective shift = userValue - 40.
+  const shiftX = Math.round((input.shiftX ?? 0) - 40);
 
   // --- Step 1a: white background, crisp settings ---------------------------
   ctx.fillStyle = '#ffffff';

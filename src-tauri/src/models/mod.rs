@@ -270,9 +270,12 @@ pub struct ProductVariant {
 /// barcode matched (if the scanned barcode belongs to a variant rather than
 /// the product itself). When `variant` is `Some`, the scanner auto-selects
 /// that variant in checkout instead of opening the variant picker.
+///
+/// `product` is nested (not flattened) so the JSON shape is stable and simple
+/// for the TypeScript side to deserialize — `#[serde(flatten)]` can interact
+/// poorly with some IPC pipelines and was causing silent failures on Windows.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BarcodeLookup {
-    #[serde(flatten)]
     pub product: ProductWithCategory,
     pub variant: Option<ProductVariant>,
 }
