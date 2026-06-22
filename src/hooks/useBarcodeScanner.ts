@@ -19,18 +19,20 @@ const SCAN_TIMEOUT_MS = 300;
  * letters for non-EAN symbologies).
  */
 function codeToChar(code: string): string | null {
-  // Top-row digits: Digit0..Digit9
-  if (code.length === 7 && code.startsWith('Digit')) {
-    return code.slice(5); // "Digit5" -> "5"
-  }
-  // Numpad digits: Numpad0..Numpad9
-  if (code.length === 8 && code.startsWith('Numpad')) {
-    return code.slice(6); // "Numpad5" -> "5"
-  }
+  // Top-row digits: Digit0..Digit9 ("Digit5" is 6 chars). Use regex to avoid
+  // fragile length assumptions — a prior version checked length === 7 which is
+  // wrong (Digit5 is 6 chars) and silently dropped every digit.
+  const digitMatch = code.match(/^Digit([0-9])$/);
+  if (digitMatch) return digitMatch[1];
+
+  // Numpad digits: Numpad0..Numpad9 ("Numpad5" is 7 chars).
+  const numpadMatch = code.match(/^Numpad([0-9])$/);
+  if (numpadMatch) return numpadMatch[1];
+
   // Alphanumerics from the main layout (for CODE128 / similar).
-  if (/^Key[A-Z]$/.test(code)) {
-    return code.slice(3); // "KeyA" -> "A"
-  }
+  const letterMatch = code.match(/^Key([A-Z])$/);
+  if (letterMatch) return letterMatch[1];
+
   return null;
 }
 
@@ -63,6 +65,12 @@ export function useBarcodeScanner(onScan: (lookup: BarcodeLookup) => void) {
     if (e.code === 'Enter' || e.code === 'NumpadEnter') {
       const { chars, firstTime } = buffer.current;
       const elapsed = Date.now() - firstTime;
+
+      // Diagnostic: log what the scanner accumulated so failures are visible.
+      if (chars.length > 0) {
+        console.log('[scanner] Enter received, buffer:', JSON.stringify(chars),
+          `len=${chars.length} elapsed=${elapsed}ms threshold=${SCAN_TIMEOUT_MS}ms`);
+      }
 
       if (chars.length >= MIN_CHARS && elapsed < SCAN_TIMEOUT_MS && !processingRef.current) {
         processingRef.current = true;
