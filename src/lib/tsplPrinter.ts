@@ -19,15 +19,6 @@ export interface TsplPrintOpts {
   gapMm: number;
 }
 
-export const DEFAULT_TSPL_OPTS: TsplPrintOpts = {
-  density: 8,
-  direction: 0,
-  shift: 0,
-  labelHeightMm: 45,
-  labelWidthMm: 35,
-  gapMm: 2,
-};
-
 /** Standard Xprinter label resolutions (dots per inch). */
 export const RESOLUTION_DPI = 203;
 
@@ -61,7 +52,7 @@ export async function listPrinters(): Promise<string[]> {
   return invoke<string[]>('list_printers');
 }
 
-/** Paper presets: physical dimensions and the resulting dot canvas. */
+/** Paper presets: physical dimensions of the loaded die-cut labels. */
 export interface PaperPreset {
   key: 'medium' | 'small';
   label: string;
@@ -71,8 +62,8 @@ export interface PaperPreset {
 }
 
 export const PAPER_PRESETS: PaperPreset[] = [
-  { key: 'medium', label: '35×45mm', widthMm: 35, heightMm: 45, gapMm: 2 },
-  { key: 'small', label: '2×4"', widthMm: 50, heightMm: 100, gapMm: 2 },
+  { key: 'medium', label: '35×34mm', widthMm: 35, heightMm: 34, gapMm: 2 },
+  { key: 'small', label: '20×40mm', widthMm: 20, heightMm: 40, gapMm: 2 },
 ];
 
 /**

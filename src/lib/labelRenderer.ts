@@ -129,7 +129,15 @@ function renderBarcodeCanvas(
   return canvas;
 }
 
-/** Threshold-and-pack a canvas into a base64 1-bit byte string. */
+/**
+ * Threshold-and-pack a canvas into a base64 1-bit byte string.
+ *
+ * Bit polarity: TSPL `BITMAP` defines bit `1` = black (print) and `0` = white
+ * (no print), MSB-first within each byte. This Xprinter prints the *inverse*
+ * (white content on a black background) with the spec polarity, so we invert:
+ * a dark source pixel → 0 in the packed byte. Toggling `DIRECTION` in the UI
+ * can also flip this, but inverting at pack time is the reliable default.
+ */
 function packMonochrome(
   ctx: CanvasRenderingContext2D,
   widthPx: number,
@@ -148,11 +156,12 @@ function packMonochrome(
         if (x < widthPx) {
           const i = (y * widthPx + x) * 4;
           const lum = (data[i] + data[i + 1] + data[i + 2]) / 3;
-          // Hard threshold: < 128 → black. MSB is the leftmost pixel.
+          // Hard threshold: < 128 → black source pixel.
           black = lum < 128;
         }
-        // Padding bits for the last byte in a row are white (0).
-        byte = (byte << 1) | (black ? 1 : 0);
+        // MSB = leftmost pixel. Invert so black → 0 (matches this printer's
+        // polarity). Padding bits at row end → 1 (no print).
+        byte = (byte << 1) | (black ? 0 : 1);
       }
       out[y * widthBytes + bx] = byte;
     }
@@ -243,21 +252,21 @@ export function renderLabelToBitmap(input: RenderLabelInput): RenderedBitmap {
   }
   cursorY += priceFont * 1.2;
 
-  // --- Step 1d: barcode (bottom, centered, scaled to fit width) ----------
+  // --- Step 1d: barcode (directly below the text, no gap) ----------------
   const barCanvas = renderBarcodeCanvas(barcode, widthPx);
   if (barCanvas) {
     const maxBarWidth = widthPx - padX * 2;
-    // Fill the remaining vertical space; the natural canvas aspect ratio
-    // keeps bar proportions correct.
-    const maxBarHeight = heightPx - cursorY - Math.round(heightPx * 0.02);
-    if (maxBarHeight > 10) {
-      const scale = Math.min(maxBarWidth / barCanvas.width, maxBarHeight / barCanvas.height);
-      const drawW = Math.floor(barCanvas.width * scale);
-      const drawH = Math.floor(barCanvas.height * scale);
-      const dx = Math.floor((widthPx - drawW) / 2);
-      const dy = Math.floor((heightPx - drawH - Math.round(heightPx * 0.01)));
-      ctx.drawImage(barCanvas, dx, dy, drawW, drawH);
-    }
+    // Scale to fill the available width; height follows the natural aspect
+    // ratio so bar proportions stay correct. No bottom anchoring — the barcode
+    // sits flush under the SKU/price row to eliminate dead space.
+    const remaining = heightPx - cursorY - Math.round(heightPx * 0.02);
+    const maxBarHeight = Math.max(10, remaining);
+    const scale = Math.min(maxBarWidth / barCanvas.width, maxBarHeight / barCanvas.height);
+    const drawW = Math.floor(barCanvas.width * scale);
+    const drawH = Math.floor(barCanvas.height * scale);
+    const dx = Math.floor((widthPx - drawW) / 2);
+    const dy = Math.floor(cursorY);
+    ctx.drawImage(barCanvas, dx, dy, drawW, drawH);
   }
 
   // --- Step 2 + 3: threshold + pack to 1-bit bytes ------------------------
