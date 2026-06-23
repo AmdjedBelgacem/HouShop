@@ -56,11 +56,24 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
   const barcodeSvgRef = useRef<SVGSVGElement>(null);
 
   function generateBarcodeValue(_name: string): string {
+    // Generate 12 random data digits, then append the EAN-13 check digit so the
+    // full 13-digit value matches what JsBarcode renders and the scanner reads
+    // back. Without the check digit, the stored value (12 digits) never matched
+    // the scanned value (13 digits) — breaking the round-trip.
     const digits: number[] = [];
     for (let i = 0; i < 12; i++) {
       digits.push(Math.floor(Math.random() * 10));
     }
-    return digits.join('');
+    return digits.join('') + ean13CheckDigit(digits);
+  }
+
+  /** Compute the EAN-13 check digit from the first 12 digits. */
+  function ean13CheckDigit(digits: number[]): string {
+    let sum = 0;
+    for (let i = 0; i < 12; i++) {
+      sum += digits[i] * (i % 2 === 0 ? 1 : 3);
+    }
+    return String((10 - (sum % 10)) % 10);
   }
 
   function generateSkuValue(name: string): string {
@@ -77,8 +90,13 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
   useEffect(() => {
     if (barcodeSvgRef.current && form.barcode) {
       try {
+        // Render the preview as EAN13 (the same format used when printing) so
+        // what the merchant sees matches the printed label. EAN13 requires
+        // 12-13 digits; fall back to CODE128 for other manual inputs.
+        const isEan13 = /^\d{12,13}$/.test(form.barcode);
         JsBarcode(barcodeSvgRef.current, form.barcode, {
-          format: 'CODE128', width: 1.5, height: 40, displayValue: true,
+          format: isEan13 ? 'EAN13' : 'CODE128',
+          width: 1.5, height: 40, displayValue: true,
           fontSize: 12, margin: 2, background: 'transparent', lineColor: 'currentColor',
         });
       } catch { }
