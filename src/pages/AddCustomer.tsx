@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+import { toast } from 'sonner';
 import { useI18n } from '../i18n';
 import type { CreateCustomer, UpdateCustomer, CustomerWithStats } from '../lib/types';
 import CustomSelect from '../components/CustomSelect';
@@ -60,8 +61,10 @@ export default function AddCustomer({ onBack, editCustomer }: AddCustomerProps) 
       queryClient.invalidateQueries({ queryKey: ['customer-stats'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
       queryClient.invalidateQueries({ queryKey: ['customers'] });
+      toast.success(t('toast.customerCreated'));
       onBack();
     },
+    onError: () => toast.error(t('toast.error')),
   });
   const updateMutation = useMutation({
     mutationFn: (data: UpdateCustomer) => invoke('update_customer', { data }),
@@ -70,8 +73,10 @@ export default function AddCustomer({ onBack, editCustomer }: AddCustomerProps) 
       queryClient.invalidateQueries({ queryKey: ['customer-stats'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
       queryClient.invalidateQueries({ queryKey: ['customers'] });
+      toast.success(t('toast.customerUpdated'));
       onBack();
     },
+    onError: () => toast.error(t('toast.error')),
   });
   const handleSubmit = () => {
     const fullAddress = [form.address, form.city, form.country, form.postal_code]

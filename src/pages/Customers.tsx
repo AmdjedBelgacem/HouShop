@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke } from '@tauri-apps/api/core';
+import { toast } from 'sonner';
 import { useI18n } from '../i18n';
 import type { CustomerWithStats, CustomerStats, CreateCustomer, UpdateCustomer } from '../lib/types';
 import CustomSelect from '../components/CustomSelect';
+import ConfirmDialog from '../components/ConfirmDialog';
 import {
   Search, Plus, Pencil, Eye, ChevronLeft, ChevronRight,
   Users, Zap, UserPlus, FileBarChart, Filter, X,
@@ -33,6 +35,7 @@ export default function Customers({ onAddCustomer, onEditCustomer }: CustomersPr
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<CustomerWithStats | null>(null);
   const [viewCustomer, setViewCustomer] = useState<CustomerWithStats | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<CustomerWithStats | null>(null);
   const [form, setForm] = useState({
     name: '', phone: '', address: '', notes: '', party_type: 'customer',
   });
@@ -51,7 +54,9 @@ export default function Customers({ onAddCustomer, onEditCustomer }: CustomersPr
       queryClient.invalidateQueries({ queryKey: ['customer-stats'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
       setShowForm(false);
+      toast.success(t('toast.customerCreated'));
     },
+    onError: () => toast.error(t('toast.error')),
   });
   const updateMutation = useMutation({
     mutationFn: (data: UpdateCustomer) => invoke('update_customer', { data }),
@@ -60,7 +65,9 @@ export default function Customers({ onAddCustomer, onEditCustomer }: CustomersPr
       queryClient.invalidateQueries({ queryKey: ['customer-stats'] });
       setEditing(null);
       setShowForm(false);
+      toast.success(t('toast.customerUpdated'));
     },
+    onError: () => toast.error(t('toast.error')),
   });
   const deleteMutation = useMutation({
     mutationFn: (id: number) => invoke('delete_customer', { id }),
@@ -68,7 +75,11 @@ export default function Customers({ onAddCustomer, onEditCustomer }: CustomersPr
       queryClient.invalidateQueries({ queryKey: ['customers-with-stats'] });
       queryClient.invalidateQueries({ queryKey: ['customer-stats'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
+      setViewCustomer(null);
+      setDeleteTarget(null);
+      toast.success(t('toast.customerDeleted'));
     },
+    onError: () => toast.error(t('toast.error')),
   });
   const openCreate = () => {
     setEditing(null);
@@ -355,12 +366,7 @@ export default function Customers({ onAddCustomer, onEditCustomer }: CustomersPr
                   className="flex-1 py-2.5 rounded-lg bg-navy text-white text-[13px] font-medium hover:bg-navy-light transition-colors">
                   {t('customers.editCustomerBtn')}
                 </button>
-                <button onClick={() => {
-                  if (confirm(t('customers.confirmDelete', { name: viewCustomer.name }))) {
-                    deleteMutation.mutate(viewCustomer.id);
-                    setViewCustomer(null);
-                  }
-                }}
+                <button onClick={() => { setDeleteTarget(viewCustomer); }}
                   className="py-2.5 px-4 rounded-lg border border-accent-red text-accent-red text-[13px] font-medium hover:bg-red-50 transition-colors">
                   {t('customers.deleteBtn')}
                 </button>
@@ -369,6 +375,17 @@ export default function Customers({ onAddCustomer, onEditCustomer }: CustomersPr
           </div>
         </ModalOverlay>
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        variant="danger"
+        title={t('common.delete')}
+        description={t('customers.deleteConfirm', { name: deleteTarget?.name ?? '' })}
+        confirmLabel={t('common.delete')}
+        loading={deleteMutation.isPending}
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

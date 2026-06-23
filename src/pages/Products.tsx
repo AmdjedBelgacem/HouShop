@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke } from '@tauri-apps/api/core';
+import { toast } from 'sonner';
 import type { Product, Category, CreateProduct, UpdateProduct, CreateInventoryTransaction } from '../lib/types';
 import CustomSelect from '../components/CustomSelect';
 import BarcodePrintModal from '../components/BarcodePrintModal';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { useI18n } from '../i18n';
 import {
   Search, Plus, Edit3, Trash2, PackagePlus, X,
@@ -25,6 +27,7 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
   const [sortField, setSortField] = useState<'name' | 'quantity' | 'selling_price'>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [barcodeProduct, setBarcodeProduct] = useState<Product | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
   const { data: products, isLoading } = useQuery({
     queryKey: ['products', search],
     queryFn: () => search
@@ -37,19 +40,23 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
   });
   const createMutation = useMutation({
     mutationFn: (data: CreateProduct) => invoke('create_product', { data }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['products'] }); queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] }); setShowForm(false); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['products'] }); queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] }); setShowForm(false); toast.success(t('toast.productCreated')); },
+    onError: () => toast.error(t('toast.error')),
   });
   const updateMutation = useMutation({
     mutationFn: (data: UpdateProduct) => invoke('update_product', { data }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['products'] }); setEditing(null); setShowForm(false); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['products'] }); setEditing(null); setShowForm(false); toast.success(t('toast.productUpdated')); },
+    onError: () => toast.error(t('toast.error')),
   });
   const deleteMutation = useMutation({
     mutationFn: (id: number) => invoke('delete_product', { id }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['products'] }); queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] }); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['products'] }); queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] }); setDeleteTarget(null); toast.success(t('toast.productDeleted')); },
+    onError: () => toast.error(t('toast.error')),
   });
   const addStockMutation = useMutation({
     mutationFn: (data: CreateInventoryTransaction) => invoke('add_stock', { data }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['products'] }); queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] }); setStockProduct(null); setShowStock(false); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ['products'] }); queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] }); setStockProduct(null); setShowStock(false); toast.success(t('toast.stockAdded')); },
+    onError: () => toast.error(t('toast.error')),
   });
   const [form, setForm] = useState({
     name: '', category_id: null as number | null, cost_price: '', selling_price: '',
@@ -216,7 +223,7 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
                           className="p-1.5 rounded-md text-accent-blue hover:bg-blue-50 transition-colors" title="Edit">
                           <Edit3 size={15} />
                         </button>
-                        <button onClick={() => { if (confirm(`Delete "${p.name}"?`)) deleteMutation.mutate(p.id); }}
+                        <button onClick={() => setDeleteTarget(p)}
                           className="p-1.5 rounded-md text-accent-red hover:bg-red-50 transition-colors" title="Delete">
                           <Trash2 size={15} />
                         </button>
@@ -349,6 +356,17 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
           onClose={() => setBarcodeProduct(null)}
         />
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        variant="danger"
+        title={t('common.delete')}
+        description={t('products.deleteConfirm', { name: deleteTarget?.name ?? '' })}
+        confirmLabel={t('common.delete')}
+        loading={deleteMutation.isPending}
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

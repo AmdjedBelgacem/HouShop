@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+import { toast } from 'sonner';
 import { useI18n } from '../i18n';
 import type {
   ReservationWithDetails, ReservationStats, Product, ProductVariant,
   CustomerWithStats, CreateReservation, Category,
 } from '../lib/types';
 import CustomSelect from '../components/CustomSelect';
+import ConfirmDialog from '../components/ConfirmDialog';
 import {
   Search, Plus, CalendarCheck, CheckCircle, XCircle, Banknote,
   Clock, Filter, X, ChevronDown, Package, Layers, ArrowLeft,
@@ -28,6 +30,9 @@ export default function Reservations() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [page, setPage] = useState(1);
   const [showForm, setShowForm] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<
+    { kind: 'complete' | 'cancel'; reservation: ReservationWithDetails } | null
+  >(null);
   const { data: reservations } = useQuery({
     queryKey: ['reservations'],
     queryFn: () => invoke<ReservationWithDetails[]>('get_reservations'),
@@ -43,14 +48,20 @@ export default function Reservations() {
       queryClient.invalidateQueries({ queryKey: ['reservation-stats'] });
       queryClient.invalidateQueries({ queryKey: ['products'] });
       queryClient.invalidateQueries({ queryKey: ['sales'] });
+      setConfirmAction(null);
+      toast.success(t('toast.reservationCompleted'));
     },
+    onError: () => toast.error(t('toast.error')),
   });
   const cancelMutation = useMutation({
     mutationFn: (id: number) => invoke('cancel_reservation', { id }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['reservations'] });
       queryClient.invalidateQueries({ queryKey: ['reservation-stats'] });
+      setConfirmAction(null);
+      toast.success(t('toast.reservationCancelled'));
     },
+    onError: () => toast.error(t('toast.error')),
   });
   const filtered = (reservations ?? []).filter(r => {
     if (statusFilter !== 'all' && r.status !== statusFilter) return false;
@@ -146,12 +157,12 @@ export default function Reservations() {
                       <div className="flex items-center justify-center gap-1">
                         {r.status === 'active' && (
                           <>
-                            <button onClick={() => completeMutation.mutate(r.id)}
-                              className="p-1.5 rounded-md text-accent-green hover:bg-green-50 transition-colors" title="Complete">
+                            <button onClick={() => setConfirmAction({ kind: 'complete', reservation: r })}
+                              className="p-1.5 rounded-md text-accent-green hover:bg-green-50 transition-colors" title={t('reservations.complete')}>
                               <CheckCircle size={15} />
                             </button>
-                            <button onClick={() => cancelMutation.mutate(r.id)}
-                              className="p-1.5 rounded-md text-accent-red hover:bg-red-50 transition-colors" title="Cancel">
+                            <button onClick={() => setConfirmAction({ kind: 'cancel', reservation: r })}
+                              className="p-1.5 rounded-md text-accent-red hover:bg-red-50 transition-colors" title={t('reservations.cancel')}>
                               <XCircle size={15} />
                             </button>
                           </>
@@ -180,6 +191,25 @@ export default function Reservations() {
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!confirmAction}
+        variant={confirmAction?.kind === 'cancel' ? 'danger' : 'default'}
+        title={confirmAction?.kind === 'cancel' ? t('reservations.cancel') : t('reservations.complete')}
+        description={
+          confirmAction?.kind === 'cancel'
+            ? t('reservations.cancelConfirm')
+            : t('reservations.completeConfirm')
+        }
+        confirmLabel={confirmAction?.kind === 'cancel' ? t('reservations.cancel') : t('reservations.complete')}
+        loading={completeMutation.isPending || cancelMutation.isPending}
+        onConfirm={() => {
+          if (!confirmAction) return;
+          if (confirmAction.kind === 'cancel') cancelMutation.mutate(confirmAction.reservation.id);
+          else completeMutation.mutate(confirmAction.reservation.id);
+        }}
+        onCancel={() => setConfirmAction(null)}
+      />
     </div>
   );
 }
@@ -242,7 +272,9 @@ function ReservationBuilder({ onClose }: { onClose: () => void }) {
       queryClient.invalidateQueries({ queryKey: ['reservations'] });
       queryClient.invalidateQueries({ queryKey: ['reservation-stats'] });
       onClose();
+      toast.success(t('toast.reservationCreated'));
     },
+    onError: () => toast.error(t('toast.error')),
   });
   const filteredCustomers = (customers ?? []).filter(c =>
     c.name.toLowerCase().includes(customerSearch.toLowerCase())

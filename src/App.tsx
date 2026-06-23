@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from './hooks/useAuth';
-import { I18nProvider } from './i18n';
-import { ThemeProvider } from './theme';
+import { I18nProvider, useI18n } from './i18n';
+import { ThemeProvider, useTheme } from './theme';
 import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -63,9 +64,26 @@ function AppContent() {
     }
   };
   return (
-    <Layout currentPage={currentPage} onNavigate={setCurrentPage}>
-      {renderPage()}
-    </Layout>
+    <>
+      <Layout currentPage={currentPage} onNavigate={setCurrentPage}>
+        {renderPage()}
+      </Layout>
+      <GlobalToaster />
+    </>
+  );
+}
+
+/** Single app-wide sonner toaster, themed to match the current light/dark + RTL mode. */
+function GlobalToaster() {
+  const { isDark } = useTheme();
+  const { isRTL } = useI18n();
+  return (
+    <Toaster
+      position={isRTL ? 'bottom-left' : 'bottom-right'}
+      theme={isDark ? 'dark' : 'light'}
+      richColors
+      closeButton
+    />
   );
 }
 export default function App() {

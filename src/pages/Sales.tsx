@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+import { toast } from 'sonner';
 import type { SaleWithItems, SalesSummary, Customer } from '../lib/types';
 import Invoice from '../components/Invoice';
 import ShippingLabel from '../components/ShippingLabel';
 import CustomSelect from '../components/CustomSelect';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { useI18n } from '../i18n';
 import {
   Search, Download, Printer, Calendar, Filter,
@@ -58,6 +60,7 @@ export default function Sales() {
   const [menuOpenId, setMenuOpenId] = useState<number | null>(null);
   const [invoiceSale, setInvoiceSale] = useState<SaleWithItems | null>(null);
   const [shippingSale, setShippingSale] = useState<SaleWithItems | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<SaleWithItems | null>(null);
   const deleteMutation = useMutation({
     mutationFn: (id: number) => invoke('delete_sale', { id }),
     onSuccess: () => {
@@ -65,13 +68,12 @@ export default function Sales() {
       queryClient.invalidateQueries({ queryKey: ['sales-summary'] });
       queryClient.invalidateQueries({ queryKey: ['products'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
+      setDeleteTarget(null);
+      toast.success(t('toast.saleDeleted'));
     },
+    onError: () => toast.error(t('toast.error')),
   });
-  const handleDeleteSale = (id: number) => {
-    if (window.confirm(t('sales.deleteConfirm', { id: 90000 + id }))) {
-      deleteMutation.mutate(id);
-    }
-  };
+  const handleDeleteSale = (s: SaleWithItems) => setDeleteTarget(s);
   const { data: sales } = useQuery({
     queryKey: ['sales'],
     queryFn: () => invoke<SaleWithItems[]>('get_sales'),
@@ -298,7 +300,7 @@ export default function Sales() {
                         <td className="py-3 px-5 text-center">
                           {deleteMode ? (
                             <button
-                              onClick={() => handleDeleteSale(s.sale.id)}
+                              onClick={() => handleDeleteSale(s)}
                               className="p-1.5 rounded-md text-accent-red hover:bg-red-50 transition-colors"
                               title="Delete transaction"
                             >
@@ -331,7 +333,7 @@ export default function Sales() {
                                       {t('shipping.printLabel')}
                                     </button>
                                     <button
-                                      onClick={(e) => { e.stopPropagation(); handleDeleteSale(s.sale.id); setMenuOpenId(null); }}
+                                      onClick={(e) => { e.stopPropagation(); handleDeleteSale(s); setMenuOpenId(null); }}
                                       className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-accent-red hover:bg-red-50 transition-colors text-left"
                                     >
                                       <Trash2 size={14} />
@@ -463,6 +465,17 @@ export default function Sales() {
           onClose={() => setShippingSale(null)}
         />
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        variant="danger"
+        title={t('common.delete')}
+        description={t('sales.deleteConfirm', { id: deleteTarget ? 90000 + deleteTarget.sale.id : 0 })}
+        confirmLabel={t('common.delete')}
+        loading={deleteMutation.isPending}
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.sale.id)}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

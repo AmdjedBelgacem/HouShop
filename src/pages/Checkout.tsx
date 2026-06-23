@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+import { toast } from 'sonner';
 import { useI18n } from '../i18n';
 import type { Product, Category, ProductVariant, CreateSale, Sale, SaleItemWithProduct, Customer } from '../lib/types';
 import { Plus, Minus, X, ShoppingCart, Package, Pencil, Check, Layers, Printer } from 'lucide-react';
 import SaleCompletionModal from '../components/SaleCompletionModal';
+import ConfirmDialog from '../components/ConfirmDialog';
 import Invoice from '../components/Invoice';
 import ShippingLabel from '../components/ShippingLabel';
 interface CheckoutProps {
@@ -43,6 +45,7 @@ export default function Checkout({ scannedProduct, scannedVariant, onScanHandled
   const [showShippingLabel, setShowShippingLabel] = useState(false);
   const [completedSaleItems, setCompletedSaleItems] = useState<SaleItemWithProduct[]>([]);
   const [completedSaleCustomer, setCompletedSaleCustomer] = useState<Customer | null>(null);
+  const [showVoidDialog, setShowVoidDialog] = useState(false);
   const { data: products } = useQuery({
     queryKey: ['products'],
     queryFn: () => invoke<Product[]>('get_products'),
@@ -80,7 +83,9 @@ export default function Checkout({ scannedProduct, scannedVariant, onScanHandled
         subtotal: item.customPrice * item.quantity,
       })));
       setCompletedSale(sale);
+      toast.success(t('toast.saleCompleted'));
     },
+    onError: () => toast.error(t('toast.error')),
   });
   const fetchVariants = async (productId: number): Promise<ProductVariant[]> => {
     try {
@@ -409,7 +414,7 @@ export default function Checkout({ scannedProduct, scannedVariant, onScanHandled
               className="w-full py-3 rounded-lg bg-navy text-white text-[13.5px] font-semibold hover:bg-navy-light disabled:opacity-50 transition-colors flex items-center justify-center gap-2">
               {createSale.isPending ? t('checkout.processing') : t('checkout.completeSaleAmount', { amount: fmt(total) })}
             </button>
-            <button onClick={() => setCart([])}
+            <button onClick={() => setShowVoidDialog(true)}
               className="w-full text-center text-[12px] text-text-muted hover:text-accent-red transition-colors">
               {t('checkout.voidTransaction')}
             </button>
@@ -519,6 +524,16 @@ export default function Checkout({ scannedProduct, scannedVariant, onScanHandled
           onClose={() => { setShowShippingLabel(false); setCompletedSale(null); }}
         />
       )}
+
+      <ConfirmDialog
+        open={showVoidDialog}
+        variant="danger"
+        title={t('checkout.voidTransaction')}
+        description={t('checkout.voidConfirm')}
+        confirmLabel={t('checkout.voidTransaction')}
+        onCancel={() => setShowVoidDialog(false)}
+        onConfirm={() => { setCart([]); setShowVoidDialog(false); toast.success(t('toast.cartCleared')); }}
+      />
     </div>
   );
 }

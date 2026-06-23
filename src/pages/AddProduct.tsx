@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+import { toast } from 'sonner';
 import { useI18n } from '../i18n';
 import type { Category, CreateProduct, Product, UpdateProduct, ProductVariant, CreateVariant } from '../lib/types';
 import CustomSelect from '../components/CustomSelect';
@@ -176,6 +177,7 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
         }
         queryClient.invalidateQueries({ queryKey: ['product-variants'] });
       }
+      toast.success(isEditing ? t('toast.productUpdated') : t('toast.productCreated'));
       if (!isEditing && form.barcode) {
         setCreatedProductId(productId);
         setShowBarcodeModal(true);
@@ -184,6 +186,7 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
       }
     } catch (err) {
       console.error('Failed to save product:', err);
+      toast.error(t('toast.error'));
     }
   };
   const handleImageSelect = async () => {
