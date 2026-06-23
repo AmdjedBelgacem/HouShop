@@ -95,6 +95,8 @@ export default function Checkout({ scannedProduct, scannedVariant, onScanHandled
     }
   };
   const addToCartWithVariant = (product: Product, variant: ProductVariant | null) => {
+    // A product is always sold as one of its variants. `variant` is null only
+    // as a defensive fallback; in practice the caller always passes one.
     const key = variant ? `v-${variant.id}` : `p-${product.id}`;
     setCart(prev => {
       const existing = prev.find(item => {
@@ -116,10 +118,13 @@ export default function Checkout({ scannedProduct, scannedVariant, onScanHandled
   };
   const handleAddToCart = async (product: Product) => {
     const variants = await fetchVariants(product.id);
-    if (variants.length > 0) {
+    // Variants are the sellable unit. Single-variant products go straight in;
+    // multi-variant products open the picker. (A product with zero variants is
+    // unsellable and shouldn't appear post-migration.)
+    if (variants.length === 1) {
+      addToCartWithVariant(product, variants[0]);
+    } else if (variants.length > 1) {
       setVariantPicker({ product, variants });
-    } else {
-      addToCartWithVariant(product, null);
     }
   };
 
@@ -432,22 +437,6 @@ export default function Checkout({ scannedProduct, scannedVariant, onScanHandled
               </button>
             </div>
             <div className="space-y-2 max-h-80 overflow-y-auto">
-              {}
-              {variantPicker.product.quantity > 0 && (
-                <button
-                  onClick={() => addToCartWithVariant(variantPicker.product, null)}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl border border-border hover:border-navy/30 hover:bg-navy/5 transition-colors text-left"
-                >
-                  <div className="w-10 h-10 rounded-lg bg-surface flex items-center justify-center">
-                    <Package size={18} className="text-text-muted" />
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-[13px] font-semibold text-text-primary">{t('checkout.baseProduct')}</p>
-                    <p className="text-[11px] text-text-muted">{t('checkout.unitsAvailable', { count: variantPicker.product.quantity })}</p>
-                  </div>
-                  <p className="text-[14px] font-bold text-text-primary">{fmt(variantPicker.product.selling_price)}</p>
-                </button>
-              )}
               {variantPicker.variants.map(v => (
                 <button
                   key={v.id}

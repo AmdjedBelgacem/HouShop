@@ -46,6 +46,13 @@ pub struct Product {
     pub created_at: String,
     pub updated_at: String,
 }
+/// A product as shown in lists. The numeric fields are now **aggregates derived
+/// from the product's variants** (the single source of truth), not stored on
+/// the product row itself:
+/// - `quantity` = sum of all variants' stock
+/// - `cost_price` / `selling_price` = min across variants (the "from" price)
+/// - `barcode` = first non-null variant barcode (display only)
+/// - `variant_count` = number of variants, for "multiple variants available" UI
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct ProductWithCategory {
     pub id: i64,
@@ -60,34 +67,45 @@ pub struct ProductWithCategory {
     pub description: Option<String>,
     pub sku: Option<String>,
     pub low_stock_threshold: i64,
+    pub variant_count: i64,
     pub created_at: String,
     pub updated_at: String,
+}
+/// A variant as supplied by the frontend when creating/updating a product.
+/// `id` is present only when editing an existing variant; absent (None) means
+/// "create new". The product form always sends ≥1 of these.
+#[derive(Debug, Clone, Deserialize)]
+pub struct VariantInput {
+    pub id: Option<i64>,
+    pub variant_name: String,
+    pub condition_note: Option<String>,
+    pub quantity: Option<i64>,
+    pub cost_price: f64,
+    pub selling_price: f64,
+    pub barcode: Option<String>,
+    pub sku: Option<String>,
+    pub image_path: Option<String>,
+    pub low_stock_threshold: Option<i64>,
 }
 #[derive(Debug, Deserialize)]
 pub struct CreateProduct {
     pub name: String,
     pub category_id: Option<i64>,
-    pub quantity: Option<i64>,
-    pub cost_price: f64,
-    pub selling_price: f64,
-    pub barcode: Option<String>,
-    pub image_path: Option<String>,
     pub description: Option<String>,
-    pub sku: Option<String>,
-    pub low_stock_threshold: Option<i64>,
+    pub image_path: Option<String>,
+    /// ≥1 variant is required — a product with no variants is unsellable.
+    pub variants: Vec<VariantInput>,
 }
 #[derive(Debug, Deserialize)]
 pub struct UpdateProduct {
     pub id: i64,
     pub name: String,
     pub category_id: Option<i64>,
-    pub cost_price: f64,
-    pub selling_price: f64,
-    pub barcode: Option<String>,
-    pub image_path: Option<String>,
     pub description: Option<String>,
-    pub sku: Option<String>,
-    pub low_stock_threshold: Option<i64>,
+    pub image_path: Option<String>,
+    /// Full desired set of variants for this product. Existing variants not in
+    /// this list are deleted; ones with an `id` are updated; new ones inserted.
+    pub variants: Vec<VariantInput>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Customer {
@@ -186,6 +204,7 @@ pub struct SaleItemWithProduct {
 pub struct InventoryTransaction {
     pub id: i64,
     pub product_id: i64,
+    pub variant_id: Option<i64>,
     pub quantity: i64,
     pub transaction_type: String,
     pub unit_cost: f64,
@@ -197,6 +216,8 @@ pub struct InventoryTransaction {
 #[derive(Debug, Deserialize)]
 pub struct CreateInventoryTransaction {
     pub product_id: i64,
+    /// Stock lives on variants, so restocking targets a specific variant.
+    pub variant_id: Option<i64>,
     pub quantity: i64,
     pub transaction_type: Option<String>,
     pub unit_cost: f64,
@@ -263,6 +284,7 @@ pub struct ProductVariant {
     pub barcode: Option<String>,
     pub sku: Option<String>,
     pub image_path: Option<String>,
+    pub low_stock_threshold: i64,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -278,30 +300,6 @@ pub struct ProductVariant {
 pub struct BarcodeLookup {
     pub product: ProductWithCategory,
     pub variant: Option<ProductVariant>,
-}
-#[derive(Debug, Deserialize)]
-pub struct CreateVariant {
-    pub product_id: i64,
-    pub variant_name: String,
-    pub condition_note: Option<String>,
-    pub quantity: Option<i64>,
-    pub cost_price: f64,
-    pub selling_price: f64,
-    pub barcode: Option<String>,
-    pub sku: Option<String>,
-    pub image_path: Option<String>,
-}
-#[derive(Debug, Deserialize)]
-pub struct UpdateVariant {
-    pub id: i64,
-    pub variant_name: String,
-    pub condition_note: Option<String>,
-    pub quantity: Option<i64>,
-    pub cost_price: f64,
-    pub selling_price: f64,
-    pub barcode: Option<String>,
-    pub sku: Option<String>,
-    pub image_path: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Reservation {

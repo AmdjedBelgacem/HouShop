@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
@@ -11,7 +11,7 @@ import CustomSelect from '../components/CustomSelect';
 import ConfirmDialog from '../components/ConfirmDialog';
 import {
   Search, Plus, CalendarCheck, CheckCircle, XCircle, Banknote,
-  Clock, Filter, X, ChevronDown, Package, Layers, ArrowLeft,
+  Clock, Filter, X, Package, Layers, ArrowLeft,
 } from 'lucide-react';
 const ITEMS_PER_PAGE = 10;
 const fmt = (n: number) => `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DA`;
@@ -276,6 +276,16 @@ function ReservationBuilder({ onClose }: { onClose: () => void }) {
     },
     onError: () => toast.error(t('toast.error')),
   });
+  // Auto-select the only variant when a product has exactly one, so the
+  // merchant doesn't have to click a single option. (Variants are mandatory,
+  // so a product always has at least one.) Inlined here rather than calling
+  // selectVariant (defined below) to avoid a temporal-dead-zone reference.
+  useEffect(() => {
+    if (selectedProduct && variants && variants.length === 1 && !selectedVariant && variants[0]) {
+      setSelectedVariant(variants[0]);
+      setTotalPrice(variants[0].selling_price.toString());
+    }
+  }, [variants, selectedProduct, selectedVariant]);
   const filteredCustomers = (customers ?? []).filter(c =>
     c.name.toLowerCase().includes(customerSearch.toLowerCase())
   ).slice(0, 8);
@@ -285,10 +295,8 @@ function ReservationBuilder({ onClose }: { onClose: () => void }) {
     return true;
   });
   const remaining = (parseFloat(totalPrice) || 0) - (parseFloat(deposit) || 0);
-  const sellingPrice = selectedVariant ? selectedVariant.selling_price : selectedProduct?.selling_price ?? 0;
   const availableStock = selectedVariant ? selectedVariant.quantity : selectedProduct?.quantity ?? 0;
   const coverImg = selectedProduct ? getCoverImage(selectedProduct.image_path) : null;
-  const variantImg = selectedVariant ? getCoverImage(selectedVariant.image_path ?? null) : null;
   const selectProduct = (p: Product) => {
     setSelectedProduct(p);
     setSelectedVariant(null);
@@ -301,11 +309,12 @@ function ReservationBuilder({ onClose }: { onClose: () => void }) {
     setTotalPrice(price.toString());
   };
   const handleSubmit = () => {
-    if (!customerId || !selectedProduct) return;
+    // A variant is required — reservations are against sellable units.
+    if (!customerId || !selectedProduct || !selectedVariant) return;
     createMutation.mutate({
       customer_id: customerId,
       product_id: selectedProduct.id,
-      variant_id: selectedVariant?.id ?? null,
+      variant_id: selectedVariant.id,
       quantity,
       deposit_amount: parseFloat(deposit) || 0,
       total_price: parseFloat(totalPrice) || 0,
@@ -421,21 +430,12 @@ function ReservationBuilder({ onClose }: { onClose: () => void }) {
                 </div>
               </div>
               {}
+              {/* Variants are the only sellable unit, so the picker lists them
+                  exclusively — there is no "base product" option to reserve. */}
               {variants && variants.length > 0 && (
                 <div>
                   <label className="block text-[11px] font-semibold text-text-muted tracking-[0.06em] uppercase mb-2">{t('reservations.selectVariantLabel')}</label>
                   <div className="space-y-1.5">
-                    <button onClick={() => selectVariant(null)}
-                      className={`w-full flex items-center gap-2.5 p-2.5 rounded-lg border text-[12.5px] transition-colors text-left ${!selectedVariant ? 'border-navy bg-navy/5 font-medium' : 'border-border text-text-secondary hover:bg-surface'}`}>
-                      <div className="w-8 h-8 rounded bg-surface flex items-center justify-center flex-shrink-0">
-                        <Package size={14} className="text-text-muted" />
-                      </div>
-                      <div className="flex-1">
-                        <p className="font-semibold text-text-primary">{t('reservations.baseProduct')}</p>
-                        <p className="text-[10px] text-text-muted">{t('reservations.availableCount', { count: selectedProduct.quantity })}</p>
-                      </div>
-                      <span className="font-bold text-text-primary">{fmt(selectedProduct.selling_price)}</span>
-                    </button>
                     {variants.map(v => {
                       const vImg = getCoverImage(v.image_path ?? null);
                       return (
@@ -522,7 +522,7 @@ function ReservationBuilder({ onClose }: { onClose: () => void }) {
         {}
         {selectedProduct && (
           <div className="border-t border-border px-5 py-4 space-y-3">
-            <button onClick={handleSubmit} disabled={!customerId || createMutation.isPending}
+            <button onClick={handleSubmit} disabled={!customerId || !selectedVariant || createMutation.isPending}
               className="w-full py-3 rounded-lg bg-navy text-white text-[13.5px] font-semibold hover:bg-navy-light disabled:opacity-50 transition-colors">
               {createMutation.isPending ? t('reservations.creating') : t('reservations.createAmount', { amount: fmt(parseFloat(totalPrice) || 0) })}
             </button>

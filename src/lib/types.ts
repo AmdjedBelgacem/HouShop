@@ -23,40 +23,53 @@ export interface Product {
   name: string;
   category_id: number | null;
   category_name: string | null;
+  /** Aggregate (sum of variant stock). Source of truth is the variants. */
   quantity: number;
+  /** "From" price — min cost across variants. */
   cost_price: number;
+  /** "From" price — min selling price across variants. */
   selling_price: number;
+  /** First non-null variant barcode (display only). */
   barcode: string | null;
   image_path: string | null;
   description: string | null;
   sku: string | null;
   low_stock_threshold: number;
+  /** Number of variants this product has. */
+  variant_count: number;
   created_at: string;
   updated_at: string;
 }
-export interface CreateProduct {
-  name: string;
-  category_id: number | null;
+/** A variant as supplied when creating/updating a product.
+ *  `id` is set only when editing an existing variant; omit for new ones. */
+export interface VariantInput {
+  id?: number;
+  variant_name: string;
+  condition_note?: string | null;
   quantity?: number;
   cost_price: number;
   selling_price: number;
   barcode?: string | null;
-  image_path?: string | null;
-  description?: string | null;
   sku?: string | null;
+  image_path?: string | null;
   low_stock_threshold?: number;
+}
+export interface CreateProduct {
+  name: string;
+  category_id: number | null;
+  description?: string | null;
+  image_path?: string | null;
+  /** ≥1 variant is required — a product with no variants is unsellable. */
+  variants: VariantInput[];
 }
 export interface UpdateProduct {
   id: number;
   name: string;
   category_id: number | null;
-  cost_price: number;
-  selling_price: number;
-  barcode?: string | null;
-  image_path?: string | null;
   description?: string | null;
-  sku?: string | null;
-  low_stock_threshold?: number;
+  image_path?: string | null;
+  /** Full desired set of variants; existing ones not listed are deleted. */
+  variants: VariantInput[];
 }
 export interface Customer {
   id: number;
@@ -144,6 +157,8 @@ export interface InventoryTransaction {
 }
 export interface CreateInventoryTransaction {
   product_id: number;
+  /** Stock lives on variants, so restocking targets a specific variant. */
+  variant_id?: number | null;
   quantity: number;
   transaction_type?: string;
   unit_cost: number;
@@ -208,6 +223,7 @@ export interface ProductVariant {
   barcode: string | null;
   sku: string | null;
   image_path: string | null;
+  low_stock_threshold: number;
   created_at: string;
   updated_at: string;
 }
@@ -219,28 +235,6 @@ export interface ProductVariant {
 export interface BarcodeLookup {
   product: Product;
   variant: ProductVariant | null;
-}
-export interface CreateVariant {
-  product_id: number;
-  variant_name: string;
-  condition_note?: string | null;
-  quantity?: number;
-  cost_price: number;
-  selling_price: number;
-  barcode?: string | null;
-  sku?: string | null;
-  image_path?: string | null;
-}
-export interface UpdateVariant {
-  id: number;
-  variant_name: string;
-  condition_note?: string | null;
-  quantity?: number;
-  cost_price: number;
-  selling_price: number;
-  barcode?: string | null;
-  sku?: string | null;
-  image_path?: string | null;
 }
 export interface Reservation {
   id: number;

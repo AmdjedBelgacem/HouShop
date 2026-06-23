@@ -38,6 +38,24 @@ export interface LabelStyling {
   price?: { fontScale?: number; offsetY?: number };
 }
 
+/**
+ * Barcode sizing overrides. The barcode is drawn as an image and these act as
+ * independent multipliers on its final dimensions:
+ * - `widthScale`  — fraction of the available width the barcode occupies
+ *                   (1 = full width, <1 = narrower with side margins).
+ * - `heightScale` — vertical multiplier on the rendered bar height
+ *                   (<1 = shorter bars, frees vertical space).
+ * - `scale`       — uniform zoom applied on top of both.
+ * All default to 1. Useful for fitting the barcode onto small labels, since the
+ * default bar height is otherwise proportional to the label and can still feel
+ * large on a 25×17mm tag. Extreme shrinking may affect scanner readability.
+ */
+export interface BarcodeSize {
+  widthScale?: number;
+  heightScale?: number;
+  scale?: number;
+}
+
 export interface RenderLabelInput {
   barcode: string;
   productName: string;
@@ -57,6 +75,8 @@ export interface RenderLabelInput {
   visibility?: LabelVisibility;
   /** Per-element font scale + vertical offset overrides. Omit for defaults. */
   styling?: LabelStyling;
+  /** Barcode width/height/scale overrides. Omit for defaults. */
+  barcodeSize?: BarcodeSize;
   /**
    * When true, merge the variant title into the product name as a single
    * inline title line (e.g. "Product — Red"), drawn at the name's font size.
@@ -146,11 +166,14 @@ function fitNameFont(
 
 /**
  * Render the EAN-13 barcode into its own offscreen canvas via JsBarcode.
- * Returns null if the barcode is invalid (caller handles).
+ * `targetBarHeight` is the desired height of the bars (not the digits) in dots;
+ * the rendered canvas is ~targetBarHeight + one text line tall. Returns null if
+ * the barcode is invalid (caller handles).
  */
 function renderBarcodeCanvas(
   barcode: string,
   widthPx: number,
+  targetBarHeight: number,
 ): HTMLCanvasElement | null {
   const canvas = document.createElement('canvas');
   try {
@@ -160,7 +183,11 @@ function renderBarcodeCanvas(
       // of usable width; choose so the full barcode fits within `widthPx`
       // while keeping modules on whole-pixel boundaries for crisp edges.
       width: Math.max(1, Math.floor(widthPx / 115)),
-      height: 70,
+      // Bar height in dots. Was a fixed 70, which (after scaling to label
+      // width) dominated small labels and pushed other content off. Now sized
+      // as a fraction of the label height so 25×17mm tags get appropriately
+      // short bars by default.
+      height: Math.max(20, Math.round(targetBarHeight)),
       displayValue: true,
       fontSize: 16,
       margin: 0,
@@ -234,6 +261,7 @@ function drawLabel(
   input: RenderLabelInput,
   vis: Required<LabelVisibility>,
   style: Required<LabelStyling>,
+  bsize: Required<BarcodeSize>,
 ) {
   const { barcode, productName, variantName, price, widthPx, heightPx } = input;
   // Base offset of -40 dots compensates for this Xprinter's printhead-to-label
@@ -289,9 +317,16 @@ function drawLabel(
   ctx.font = `900 ${priceFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
   const priceBlockH = priceText ? priceFont * 1.2 : 0;
 
-  const barCanvas = vis.barcode ? renderBarcodeCanvas(barcode, widthPx) : null;
+  // Default bar height scales with the label so small tags (25×17mm) get short
+  // bars instead of the old fixed-70 that dwarfed them. heightScale/widthScale/
+  // scale are user overrides applied here and again at draw time.
+  const defaultBarH = Math.round(heightPx * 0.22) * bsize.heightScale * bsize.scale;
+  const barCanvas = vis.barcode ? renderBarcodeCanvas(barcode, widthPx, defaultBarH) : null;
+  // The barcode is drawn at an effective width = available width × widthScale ×
+  // scale, so widthScale/scale narrow it and add side margins.
+  const barAreaWidth = Math.max(8, (widthPx - padX * 2) * bsize.widthScale * bsize.scale);
   const barBlockH = barCanvas
-    ? Math.floor(barCanvas.height * Math.min((widthPx - padX * 2) / barCanvas.width))
+    ? Math.floor(barCanvas.height * Math.min(barAreaWidth / barCanvas.width))
     : 0;
 
   // Tight inter-block spacing: keeps content grouped, centered as one block.
@@ -345,8 +380,9 @@ function drawLabel(
   // --- PASS 2: barcode (flush under the price) --------------------------
   if (barCanvas) {
     cursorY += gapPriceBar;
-    const maxBarWidth = widthPx - padX * 2;
-    const scale = maxBarWidth / barCanvas.width;
+    // Draw at the same effective width used during measurement so the layout
+    // (centering, total height) matches what was computed above.
+    const scale = barAreaWidth / barCanvas.width;
     const drawW = Math.floor(barCanvas.width * scale);
     const drawH = Math.floor(barCanvas.height * scale);
     const dx = Math.floor((widthPx - drawW) / 2) + shiftX;
@@ -377,6 +413,15 @@ function resolveStyling(s: LabelStyling | undefined): Required<LabelStyling> {
   };
 }
 
+/** Normalize a partial barcode-size object so all three multipliers are set. */
+function resolveBarcodeSize(b: BarcodeSize | undefined): Required<BarcodeSize> {
+  return {
+    widthScale: b?.widthScale ?? 1,
+    heightScale: b?.heightScale ?? 1,
+    scale: b?.scale ?? 1,
+  };
+}
+
 /**
  * Compose the label and return its packed 1-bit bitmap.
  * Throws on invalid barcode / invalid dimensions.
@@ -396,7 +441,7 @@ export function renderLabelToBitmap(input: RenderLabelInput): RenderedBitmap {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('Failed to acquire 2D canvas context');
 
-  drawLabel(ctx, input, resolveVisibility(input.visibility), resolveStyling(input.styling));
+  drawLabel(ctx, input, resolveVisibility(input.visibility), resolveStyling(input.styling), resolveBarcodeSize(input.barcodeSize));
 
   // --- Step 2 + 3: threshold + pack to 1-bit bytes ------------------------
   const { packedBase64, widthBytes } = packMonochrome(ctx, widthPx, heightPx);
@@ -423,6 +468,6 @@ export function renderLabelToDataURL(input: RenderLabelInput): string {
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Failed to acquire 2D canvas context');
 
-  drawLabel(ctx, { ...input, widthPx: w }, resolveVisibility(input.visibility), resolveStyling(input.styling));
+  drawLabel(ctx, { ...input, widthPx: w }, resolveVisibility(input.visibility), resolveStyling(input.styling), resolveBarcodeSize(input.barcodeSize));
   return canvas.toDataURL('image/png');
 }

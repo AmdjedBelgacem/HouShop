@@ -8,7 +8,12 @@ pub async fn get_dashboard_stats(pool: State<'_, SqlitePool>) -> Result<Dashboar
         .await
         .map_err(|e| format!("DB error: {}", e))?;
     let low_stock_count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM products WHERE quantity <= low_stock_threshold",
+        r#"SELECT COUNT(DISTINCT p.id) FROM products p
+           WHERE EXISTS (
+               SELECT 1 FROM product_variants pv
+               WHERE pv.product_id = p.id
+                 AND pv.quantity <= pv.low_stock_threshold
+           )"#,
     )
     .fetch_one(pool.inner())
     .await

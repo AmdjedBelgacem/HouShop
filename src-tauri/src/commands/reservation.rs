@@ -55,28 +55,36 @@ pub async fn create_reservation(
 ) -> Result<Reservation, String> {
     let quantity = data.quantity.unwrap_or(1);
     let remaining = data.total_price - data.deposit_amount;
-    let available: (i64,) = if let Some(variant_id) = data.variant_id {
+    // Stock is tracked per variant. The reservation must target a variant; if
+    // none was provided, fall back to the product's first variant so a legacy
+    // caller still resolves to a restockable unit.
+    let variant_id = match data.variant_id {
+        Some(vid) => Some(vid),
+        None => {
+            let row: Option<(i64,)> = sqlx::query_as(
+                "SELECT id FROM product_variants WHERE product_id = ? ORDER BY id LIMIT 1",
+            )
+            .bind(data.product_id)
+            .fetch_optional(pool.inner())
+            .await
+            .map_err(|e| format!("Failed to resolve variant: {}", e))?;
+            row.map(|(id,)| id)
+        }
+    };
+    let available: (i64,) = if let Some(vid) = variant_id {
         sqlx::query_as(
             r#"SELECT COALESCE(pv.quantity, 0) - COALESCE(
                 (SELECT SUM(r.quantity) FROM reservations r WHERE r.variant_id = ? AND r.status = 'active'), 0
             ) as available FROM product_variants pv WHERE pv.id = ?"#,
         )
-        .bind(variant_id)
-        .bind(variant_id)
+        .bind(vid)
+        .bind(vid)
         .fetch_one(pool.inner())
         .await
         .map_err(|e| format!("Failed to check stock: {}", e))?
     } else {
-        sqlx::query_as(
-            r#"SELECT COALESCE(p.quantity, 0) - COALESCE(
-                (SELECT SUM(r.quantity) FROM reservations r WHERE r.product_id = ? AND r.variant_id IS NULL AND r.status = 'active'), 0
-            ) as available FROM products p WHERE p.id = ?"#,
-        )
-        .bind(data.product_id)
-        .bind(data.product_id)
-        .fetch_one(pool.inner())
-        .await
-        .map_err(|e| format!("Failed to check stock: {}", e))?
+        // No variants at all on this product (shouldn't happen post-migration).
+        (0,)
     };
     if available.0 < quantity {
         return Err(format!(
@@ -90,7 +98,7 @@ pub async fn create_reservation(
     )
     .bind(data.customer_id)
     .bind(data.product_id)
-    .bind(data.variant_id)
+    .bind(variant_id)
     .bind(quantity)
     .bind(data.deposit_amount)
     .bind(data.total_price)
@@ -125,15 +133,19 @@ pub async fn complete_reservation(
         return Err("Reservation is not active".to_string());
     }
     let total_amount = reservation.total_price;
-    let total_cost: f64 = sqlx::query_as(
-        "SELECT COALESCE(cost_price, 0.0) FROM products WHERE id = ?",
-    )
-    .bind(reservation.product_id)
-    .fetch_one(&mut *tx)
-    .await
-    .map(|r: (f64,)| r.0)
-    .unwrap_or(0.0)
-    * reservation.quantity as f64;
+    // Cost lives on the variant now; fall back to 0 for legacy rows without one.
+    let unit_cost: f64 = match reservation.variant_id {
+        Some(vid) => {
+            let row: (f64,) = sqlx::query_as("SELECT COALESCE(cost_price, 0.0) FROM product_variants WHERE id = ?")
+                .bind(vid)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| format!("Failed to fetch variant cost: {}", e))?;
+            row.0
+        }
+        None => 0.0,
+    };
+    let total_cost = unit_cost * reservation.quantity as f64;
     let profit = total_amount - total_cost;
     let sale_result = sqlx::query(
         r#"INSERT INTO sales (customer_id, total_amount, total_cost, profit, payment_method, notes)
@@ -154,12 +166,28 @@ pub async fn complete_reservation(
         reservation.total_price
     };
     let unit_cost = total_cost / reservation.quantity.max(1) as f64;
+    // Record the variant name on the sale item for display parity with direct
+    // checkout sales. Resolved from the variant so it stays consistent.
+    let variant_name: Option<String> = match reservation.variant_id {
+        Some(vid) => {
+            let row: (Option<String>,) =
+                sqlx::query_as("SELECT variant_name FROM product_variants WHERE id = ?")
+                    .bind(vid)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| format!("Failed to fetch variant name: {}", e))?;
+            row.0
+        }
+        None => None,
+    };
     sqlx::query(
-        r#"INSERT INTO sale_items (sale_id, product_id, quantity, unit_price, unit_cost, subtotal)
-           VALUES (?, ?, ?, ?, ?, ?)"#,
+        r#"INSERT INTO sale_items (sale_id, product_id, variant_id, variant_name, quantity, unit_price, unit_cost, subtotal)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)"#,
     )
     .bind(sale_id)
     .bind(reservation.product_id)
+    .bind(reservation.variant_id)
+    .bind(&variant_name)
     .bind(reservation.quantity)
     .bind(unit_price)
     .bind(unit_cost)
@@ -167,6 +195,8 @@ pub async fn complete_reservation(
     .execute(&mut *tx)
     .await
     .map_err(|e| format!("Failed to insert sale item: {}", e))?;
+    // Stock is on the variant. Legacy rows without a variant_id skip the update
+    // (nothing restockable to decrement).
     if let Some(variant_id) = reservation.variant_id {
         sqlx::query("UPDATE product_variants SET quantity = quantity - ?, updated_at = datetime('now') WHERE id = ?")
             .bind(reservation.quantity)
@@ -174,13 +204,6 @@ pub async fn complete_reservation(
             .execute(&mut *tx)
             .await
             .map_err(|e| format!("Failed to update variant stock: {}", e))?;
-    } else {
-        sqlx::query("UPDATE products SET quantity = quantity - ?, updated_at = datetime('now') WHERE id = ?")
-            .bind(reservation.quantity)
-            .bind(reservation.product_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("Failed to update stock: {}", e))?;
     }
     sqlx::query(
         "UPDATE reservations SET status = 'completed', updated_at = datetime('now') WHERE id = ?",

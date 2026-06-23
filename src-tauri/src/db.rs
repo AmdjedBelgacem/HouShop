@@ -76,6 +76,24 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), String> {
     let _ = sqlx::query("ALTER TABLE product_variants ADD COLUMN image_path TEXT").execute(pool).await;
     let _ = sqlx::query("ALTER TABLE sale_items ADD COLUMN variant_id INTEGER").execute(pool).await;
     let _ = sqlx::query("ALTER TABLE sale_items ADD COLUMN variant_name TEXT").execute(pool).await;
+    let _ = sqlx::query("ALTER TABLE inventory_transactions ADD COLUMN variant_id INTEGER").execute(pool).await;
+    // --- Variants become the single source of truth for stock/price/barcode/SKU.
+    // Each variant gets its own low-stock threshold (alert is per variant), and
+    // barcode/SKU are enforced unique so generated values can't collide across
+    // variants. These run guarded by IF NOT EXISTS / try/ignore so they're safe
+    // to apply repeatedly on existing databases.
+    let _ = sqlx::query("ALTER TABLE product_variants ADD COLUMN low_stock_threshold INTEGER NOT NULL DEFAULT 5").execute(pool).await;
+    let _ = sqlx::query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_variants_barcode ON product_variants(barcode) WHERE barcode IS NOT NULL"
+    ).execute(pool).await;
+    let _ = sqlx::query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_variants_sku ON product_variants(sku) WHERE sku IS NOT NULL"
+    ).execute(pool).await;
+    // Backfill: any legacy product that has no variants yet gets a single
+    // "Default" variant cloned from the product's own (now-dormant) columns, so
+    // it remains sellable after the model change. Idempotent — only touches
+    // products that still have zero variants.
+    backfill_default_variants(pool).await;
     sqlx::query("PRAGMA journal_mode=WAL;")
         .execute(pool)
         .await
@@ -161,6 +179,86 @@ async fn seed_if_empty(pool: &SqlitePool) -> Result<(), String> {
         }
     }
     Ok(())
+}
+/// Backfill a single "Default" variant for every product that has no variants
+/// yet. Variants are now the single source of truth for stock, prices, barcode,
+/// and SKU — so a legacy product with zero variants would become unsellable.
+/// Cloning the product's own columns into one Default variant keeps existing
+/// data working transparently. Idempotent: re-runs only touch products still
+/// missing variants. Rows whose barcode/SKU would collide with an existing
+/// variant are nulled out rather than failing the whole backfill.
+async fn backfill_default_variants(pool: &SqlitePool) {
+    // Products that still have no variants.
+    let orphans: Result<Vec<(i64, Option<String>, i64, f64, f64, Option<String>, Option<String>, i64)>, _> = sqlx::query_as(
+        r#"SELECT p.id, p.name, p.quantity, p.cost_price, p.selling_price,
+                  p.barcode, p.sku, p.low_stock_threshold
+           FROM products p
+           WHERE NOT EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = p.id)"#,
+    )
+    .fetch_all(pool)
+    .await;
+
+    let orphans = match orphans {
+        Ok(rows) => rows,
+        Err(e) => {
+            eprintln!("Backfill scan failed: {}", e);
+            return;
+        }
+    };
+    for (id, name, qty, cost, price, barcode, sku, threshold) in orphans {
+        // Null out barcode/SKU if another variant already owns them, to avoid a
+        // unique-index violation. The merchant can regenerate unique ones later.
+        let barcode_safe = match &barcode {
+            Some(b) if !b.is_empty() => {
+                let taken: Result<(i64,), _> = sqlx::query_as(
+                    "SELECT COUNT(*) FROM product_variants WHERE barcode = ?",
+                )
+                .bind(b)
+                .fetch_one(pool)
+                .await;
+                match taken {
+                    Ok((c,)) if c > 0 => None,
+                    _ => barcode.clone(),
+                }
+            }
+            _ => None,
+        };
+        let sku_safe = match &sku {
+            Some(s) if !s.is_empty() => {
+                let taken: Result<(i64,), _> = sqlx::query_as(
+                    "SELECT COUNT(*) FROM product_variants WHERE sku = ?",
+                )
+                .bind(s)
+                .fetch_one(pool)
+                .await;
+                match taken {
+                    Ok((c,)) if c > 0 => None,
+                    _ => sku.clone(),
+                }
+            }
+            _ => None,
+        };
+        let variant_name = name.unwrap_or_else(|| "Default".to_string());
+        let res = sqlx::query(
+            r#"INSERT INTO product_variants
+               (product_id, variant_name, condition_note, quantity, cost_price, selling_price,
+                barcode, sku, image_path, low_stock_threshold)
+               VALUES (?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?)"#,
+        )
+        .bind(id)
+        .bind(&variant_name)
+        .bind(qty)
+        .bind(cost)
+        .bind(price)
+        .bind(&barcode_safe)
+        .bind(&sku_safe)
+        .bind(threshold)
+        .execute(pool)
+        .await;
+        if let Err(e) = res {
+            eprintln!("Backfill insert failed for product {}: {}", id, e);
+        }
+    }
 }
 pub fn get_images_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let app_data = app

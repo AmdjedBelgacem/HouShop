@@ -52,6 +52,8 @@ pub async fn create_sale(
         .execute(&mut *tx)
         .await
         .map_err(|e| format!("Failed to insert sale item: {}", e))?;
+        // Stock lives on variants. A sale item must carry a variant_id; legacy
+        // items without one (pre-migration data) simply skip the stock update.
         if let Some(vid) = item.variant_id {
             sqlx::query("UPDATE product_variants SET quantity = quantity - ?, updated_at = datetime('now') WHERE id = ?")
                 .bind(item.quantity)
@@ -59,13 +61,6 @@ pub async fn create_sale(
                 .execute(&mut *tx)
                 .await
                 .map_err(|e| format!("Failed to update variant stock: {}", e))?;
-        } else {
-            sqlx::query("UPDATE products SET quantity = quantity - ?, updated_at = datetime('now') WHERE id = ?")
-                .bind(item.quantity)
-                .bind(item.product_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("Failed to update stock: {}", e))?;
         }
     }
     tx.commit()
@@ -186,14 +181,10 @@ pub async fn delete_sale(
                 .execute(&mut *tx)
                 .await
                 .map_err(|e| format!("Failed to restore variant stock: {}", e))?;
-        } else {
-            sqlx::query("UPDATE products SET quantity = quantity + ?, updated_at = datetime('now') WHERE id = ?")
-                .bind(quantity)
-                .bind(product_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("Failed to restore stock: {}", e))?;
         }
+        // Legacy items (pre-migration, no variant_id) have no restockable row;
+        // the product's own quantity column is dormant, so we skip them.
+        let _ = product_id;
     }
     sqlx::query("DELETE FROM sales WHERE id = ?")
         .bind(id)

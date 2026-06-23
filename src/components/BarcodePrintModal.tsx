@@ -13,7 +13,7 @@ import {
   RESOLUTION_DPI,
   type PaperPreset,
 } from '../lib/tsplPrinter';
-import { renderLabelToDataURL, type LabelVisibility, type LabelStyling } from '../lib/labelRenderer';
+import { renderLabelToDataURL, type LabelVisibility, type LabelStyling, type BarcodeSize } from '../lib/labelRenderer';
 import type { ProductVariant } from '../lib/types';
 
 interface BarcodePrintModalProps {
@@ -51,11 +51,20 @@ export default function BarcodePrintModal({ barcode, productName, productId, var
     variant: { fontScale: 1, offsetY: 0 },
     price: { fontScale: 1, offsetY: 0 },
   });
+  // Barcode sizing: independent width/height multipliers + a uniform scale.
+  // Defaults to 1/1/1 (full width, default bar height). Height/scale < 1 shrink
+  // the bars — handy on 25×17mm tags where the default height can feel large.
+  const [barcodeSize, setBarcodeSize] = useState<BarcodeSize>({
+    widthScale: 1,
+    heightScale: 1,
+    scale: 1,
+  });
   const [loadingPrinters, setLoadingPrinters] = useState(false);
   const [printing, setPrinting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showStyling, setShowStyling] = useState(false);
+  const [showBarcodeSize, setShowBarcodeSize] = useState(false);
   // When true, the variant title is merged into the product name as a single
   // inline title line ("Product — Variant") instead of a separate subtitle.
   const [combineNameVariant, setCombineNameVariant] = useState(false);
@@ -135,6 +144,7 @@ export default function BarcodePrintModal({ barcode, productName, productId, var
         shiftX: tunables.shiftX,
         visibility,
         styling,
+        barcodeSize,
         combineNameVariant,
         widthPx,
         heightPx,
@@ -142,7 +152,7 @@ export default function BarcodePrintModal({ barcode, productName, productId, var
     } catch {
       return null;
     }
-  }, [effectiveBarcode, productName, effectiveVariantName, effectivePrice, barcodeError, paper, tunables.shiftX, visibility, styling, combineNameVariant]);
+  }, [effectiveBarcode, productName, effectiveVariantName, effectivePrice, barcodeError, paper, tunables.shiftX, visibility, styling, barcodeSize, combineNameVariant]);
 
   // Load the printer list once on mount.
   useEffect(() => {
@@ -211,6 +221,7 @@ export default function BarcodePrintModal({ barcode, productName, productId, var
           price: effectivePrice,
           visibility,
           styling,
+          barcodeSize,
           combineNameVariant,
         },
         paper,
@@ -368,6 +379,58 @@ export default function BarcodePrintModal({ barcode, productName, productId, var
                   disabled={!visibility.price || price == null || price <= 0}
                   onChange={(fs, oy) => setStyling(s => ({ ...s, price: { fontScale: fs, offsetY: oy } }))}
                 />
+              </div>
+            )}
+          </div>
+
+          {/* Barcode size: independent width/height multipliers + uniform scale.
+              Height/scale < 1 shrink the bars (useful on small labels). */}
+          <div>
+            <div className="flex items-center justify-between">
+              <button
+                onClick={() => setShowBarcodeSize(v => !v)}
+                className="text-[11px] font-semibold text-navy hover:underline"
+              >
+                {showBarcodeSize ? '− Hide' : '+ Show'} barcode size
+              </button>
+              {showBarcodeSize && (
+                <button
+                  onClick={() => setBarcodeSize({ widthScale: 1, heightScale: 1, scale: 1 })}
+                  className="text-[10px] text-text-muted hover:text-text-primary"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+            {showBarcodeSize && (
+              <div className="space-y-2 mt-2">
+                <SizeRow
+                  label="Width"
+                  value={barcodeSize.widthScale ?? 1}
+                  min={0.3}
+                  max={1.5}
+                  step={0.05}
+                  onChange={v => setBarcodeSize(s => ({ ...s, widthScale: v }))}
+                />
+                <SizeRow
+                  label="Height"
+                  value={barcodeSize.heightScale ?? 1}
+                  min={0.2}
+                  max={2}
+                  step={0.05}
+                  onChange={v => setBarcodeSize(s => ({ ...s, heightScale: v }))}
+                />
+                <SizeRow
+                  label="Scale"
+                  value={barcodeSize.scale ?? 1}
+                  min={0.3}
+                  max={2}
+                  step={0.05}
+                  onChange={v => setBarcodeSize(s => ({ ...s, scale: v }))}
+                />
+                <p className="text-[9.5px] text-text-muted leading-snug">
+                  Lower the height or height-scale to shorten the bars and free vertical space. Narrowing width or scale leaves side margins. Shrinking too much can hurt scanner readability.
+                </p>
               </div>
             )}
           </div>
@@ -651,6 +714,37 @@ function StyleRow({
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+/** One row of barcode sizing: label + a single multiplier stepper (in ×). */
+function SizeRow({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border border-border bg-surface">
+      <span className="text-[11px] font-medium text-text-primary w-14 flex-shrink-0">{label}</span>
+      <Stepper
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        onChange={onChange}
+        format={v => `${v.toFixed(2)}×`}
+      />
     </div>
   );
 }
