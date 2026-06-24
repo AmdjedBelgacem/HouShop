@@ -183,12 +183,13 @@ function renderBarcodeCanvas(
 ): HTMLCanvasElement | null {
   const canvas = document.createElement('canvas');
   try {
+    // Module width in printer dots. 95 modules + 2×6 quiet = ~107 modules of
+    // usable width; choose so the full barcode fits within `widthPx` while
+    // keeping modules on whole-pixel boundaries for crisp edges.
+    const moduleWidth = Math.max(1, Math.floor(widthPx / 115));
     JsBarcode(canvas, barcode, {
       format: 'EAN13',
-      // Module width in printer dots. 95 modules + 2×6 quiet = ~107 modules
-      // of usable width; choose so the full barcode fits within `widthPx`
-      // while keeping modules on whole-pixel boundaries for crisp edges.
-      width: Math.max(1, Math.floor(widthPx / 115)),
+      width: moduleWidth,
       // Bar height in dots. Was a fixed 70, which (after scaling to label
       // width) dominated small labels and pushed other content off. Now sized
       // as a fraction of the label height so 25×17mm tags get appropriately
@@ -197,6 +198,15 @@ function renderBarcodeCanvas(
       displayValue: true,
       fontSize: 16,
       margin: 0,
+      // Quiet zones: EAN-13 needs ~9 blank modules on each side for a scanner
+      // to detect the start/end guard. `margin: 0` stripped them, and on the
+      // cramped small label the left quiet zone + start guard got clipped, so
+      // scanners dropped the first digit. marginLeft/marginRight restore them;
+      // the canvas is then scaled to fit the label, so the bars stay centered
+      // with proper blank space either side. This is why later variants scanned
+      // as 12 digits — their leading context was cut off.
+      marginLeft: moduleWidth * 9,
+      marginRight: moduleWidth * 9,
       background: '#ffffff',
       lineColor: '#000000',
     });

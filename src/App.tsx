@@ -14,6 +14,7 @@ import Customers from './pages/Customers';
 import AddCustomer from './pages/AddCustomer';
 import Profile from './pages/Profile';
 import Reservations from './pages/Reservations';
+import Returns from './pages/Returns';
 import Logs from './pages/Logs';
 import type { Product, CustomerWithStats, ProductVariant, BarcodeLookup } from './lib/types';
 import { useState, useCallback } from 'react';
@@ -26,7 +27,7 @@ const queryClient = new QueryClient({
     },
   },
 });
-type Page = 'dashboard' | 'products' | 'add-product' | 'edit-product' | 'history' | 'customers' | 'add-customer' | 'edit-customer' | 'reservations' | 'pos' | 'profile' | 'logs';
+type Page = 'dashboard' | 'products' | 'add-product' | 'edit-product' | 'history' | 'customers' | 'add-customer' | 'edit-customer' | 'reservations' | 'returns' | 'pos' | 'profile' | 'logs';
 function AppContent() {
   const { isAuthenticated } = useAuth();
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
@@ -57,6 +58,7 @@ function AppContent() {
       case 'add-customer': return <AddCustomer onBack={() => setCurrentPage('customers')} />;
       case 'edit-customer': return <AddCustomer onBack={() => setCurrentPage('customers')} editCustomer={editingCustomer} />;
       case 'reservations': return <Reservations />;
+      case 'returns': return <Returns />;
       case 'pos': return <Checkout scannedProduct={scannedProduct} scannedVariant={scannedVariant} onScanHandled={() => { setScannedProduct(null); setScannedVariant(null); }} />;
       case 'profile': return <Profile />;
       case 'logs': return <Logs onBack={() => setCurrentPage('dashboard')} />;

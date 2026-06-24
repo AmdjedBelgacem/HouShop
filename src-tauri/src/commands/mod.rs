@@ -5,4 +5,5 @@ pub mod inventory;
 pub mod printer;
 pub mod product;
 pub mod reservation;
+pub mod returns;
 pub mod sale;

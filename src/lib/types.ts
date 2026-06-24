@@ -144,6 +144,36 @@ export interface SaleWithItems {
   sale: Sale;
   items: SaleItemWithProduct[];
 }
+/** Input for recording a customer return against a line of a past sale. */
+export interface CreateReturn {
+  sale_id: number;
+  sale_item_id: number;
+  product_id: number;
+  variant_id: number | null;
+  quantity: number;
+  refund_amount: number;
+  reason: string | null;
+}
+/** A recorded return joined with display context (returned by get_returns). */
+export interface ReturnWithDetails {
+  id: number;
+  sale_id: number;
+  sale_item_id: number;
+  product_id: number;
+  variant_id: number | null;
+  quantity: number;
+  refund_amount: number;
+  reason: string | null;
+  created_at: string;
+  product_name: string;
+  variant_name: string | null;
+  customer_name: string | null;
+}
+export interface ReturnsSummary {
+  total_returns: number;
+  total_refunded: number;
+  units_returned: number;
+}
 export interface InventoryTransaction {
   id: number;
   product_id: number;

@@ -163,6 +163,31 @@ pub struct SaleItem {
     pub unit_cost: f64,
     pub subtotal: f64,
 }
+/// A recorded customer return linked to a specific line of a past sale.
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Return {
+    pub id: i64,
+    pub sale_id: i64,
+    pub sale_item_id: i64,
+    pub product_id: i64,
+    pub variant_id: Option<i64>,
+    pub quantity: i64,
+    pub refund_amount: f64,
+    pub reason: Option<String>,
+    pub created_at: String,
+}
+/// A return as supplied by the frontend. Tied to a sale item so we can enforce
+/// "you can't return more than was sold".
+#[derive(Debug, Deserialize)]
+pub struct CreateReturn {
+    pub sale_id: i64,
+    pub sale_item_id: i64,
+    pub product_id: i64,
+    pub variant_id: Option<i64>,
+    pub quantity: i64,
+    pub refund_amount: f64,
+    pub reason: Option<String>,
+}
 #[derive(Debug, Deserialize)]
 pub struct CartItem {
     pub product_id: i64,

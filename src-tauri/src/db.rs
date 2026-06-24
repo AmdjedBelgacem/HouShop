@@ -69,6 +69,29 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), String> {
             FOREIGN KEY (variant_id) REFERENCES product_variants(id) ON DELETE SET NULL
         )"
     ).execute(pool).await;
+    // Returns: a customer hands back items from a past sale. Each row links to
+    // the original sale item, records how many units came back, the refund given,
+    // and a reason. create_return restocks the variant and adjusts the sale's
+    // totals, so a return is both an inventory correction and a money record.
+    let _ = sqlx::query(
+        "CREATE TABLE IF NOT EXISTS returns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sale_id INTEGER NOT NULL,
+            sale_item_id INTEGER NOT NULL,
+            product_id INTEGER NOT NULL,
+            variant_id INTEGER,
+            quantity INTEGER NOT NULL,
+            refund_amount REAL NOT NULL DEFAULT 0.0,
+            reason TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
+            FOREIGN KEY (sale_item_id) REFERENCES sale_items(id) ON DELETE CASCADE,
+            FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE RESTRICT,
+            FOREIGN KEY (variant_id) REFERENCES product_variants(id) ON DELETE SET NULL
+        )"
+    ).execute(pool).await;
+    let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_returns_sale ON returns(sale_id)").execute(pool).await;
+    let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_returns_sale_item ON returns(sale_item_id)").execute(pool).await;
     let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_variants_product ON product_variants(product_id)").execute(pool).await;
     let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_reservations_customer ON reservations(customer_id)").execute(pool).await;
     let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_reservations_product ON reservations(product_id)").execute(pool).await;
