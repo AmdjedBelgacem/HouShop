@@ -71,6 +71,31 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
     }
     return String((10 - (sum % 10)) % 10);
   }
+  /**
+   * Generate a barcode guaranteed unique across the catalog. Retries with fresh
+   * random values until the backend confirms it's unused (two products can't
+   * share a barcode). `excludeVariantId` lets a variant keep its own barcode
+   * when regenerating during an edit. Bounded attempts → falls back to the last
+   * candidate (the unique DB index still rejects a collision at save time).
+   */
+  async function generateUniqueBarcode(excludeVariantId?: number): Promise<string> {
+    let candidate = generateBarcodeValue();
+    for (let i = 0; i < 8; i++) {
+      try {
+        const taken = await invoke<boolean>('is_barcode_taken', {
+          barcode: candidate,
+          excludeVariantId: excludeVariantId ?? null,
+        });
+        if (!taken) return candidate;
+      } catch {
+        // If the check fails, trust the candidate; the insert's unique index is
+        // the final guard.
+        return candidate;
+      }
+      candidate = generateBarcodeValue();
+    }
+    return candidate;
+  }
   function generateSkuValue(name: string): string {
     const words = name.trim().split(/\s+/).filter(Boolean);
     const abbr = words.map(w => {
@@ -113,12 +138,18 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
   }, [existingVariants, isEditing]);
   // Seed one prefilled variant on create. Done via a ref-guarded effect rather
   // than a lazy initializer because generating its SKU/barcode at module load
-  // would run even when editing.
+  // would run even when editing. The seeded barcode is then checked against the
+  // catalog and regenerated if it happens to collide (two products can't share a
+  // barcode).
   const seededRef = useRef(false);
   useEffect(() => {
     if (!isEditing && !seededRef.current) {
       seededRef.current = true;
       setVariants([makeBlankVariant(form.name, generateSkuValue, generateBarcodeValue)]);
+      // Fix up the seeded barcode to be catalog-unique (fresh variant has no id).
+      generateUniqueBarcode().then(bc => {
+        setVariants(prev => prev.length > 0 ? [{ ...prev[0], barcode: bc }, ...prev.slice(1)] : prev);
+      });
     }
   }, [isEditing]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -176,7 +207,14 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
       }
     } catch (err) {
       console.error('Failed to save product:', err);
-      toast.error(typeof err === 'string' ? err : t('toast.error'));
+      const msg = typeof err === 'string' ? err : (err instanceof Error ? err.message : t('toast.error'));
+      // A duplicate barcode trips the unique index on save. Surface a clear
+      // message so the merchant knows to regenerate rather than debug a raw error.
+      if (/barcode/i.test(msg) && /unique/i.test(msg)) {
+        toast.error(t('toast.duplicateBarcode'));
+      } else {
+        toast.error(msg);
+      }
     }
   };
 
@@ -249,6 +287,16 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
 
   const addVariant = () => {
     setVariants(prev => [...prev, makeBlankVariant(form.name, generateSkuValue, generateBarcodeValue)]);
+    // Make the new variant's barcode catalog-unique. Fresh variant has no id,
+    // so no exclusion — the unique DB index is the final guard on save.
+    generateUniqueBarcode().then(bc => {
+      setVariants(prev => {
+        if (prev.length === 0) return prev;
+        const next = [...prev];
+        next[next.length - 1] = { ...next[next.length - 1], barcode: bc };
+        return next;
+      });
+    });
   };
   const removeVariant = (idx: number) => {
     setVariants(prev => prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev);
@@ -332,7 +380,14 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
                 onRemove={() => removeVariant(i)}
                 onImageSelect={() => handleVariantImageSelect(i)}
                 onGenSku={() => setVariants(prev => prev.map((vv, j) => j === i ? { ...vv, sku: generateSkuValue(form.name) } : vv))}
-                onGenBarcode={() => setVariants(prev => prev.map((vv, j) => j === i ? { ...vv, barcode: generateBarcodeValue() } : vv))}
+                onGenBarcode={() => {
+                  // Regenerate a fresh unique barcode for this variant. Excludes
+                  // the variant's own id when editing so it can keep its value.
+                  const id = v.id;
+                  generateUniqueBarcode(id).then(bc => {
+                    setVariants(prev => prev.map((vv, j) => j === i ? { ...vv, barcode: bc } : vv));
+                  });
+                }}
               />
             ))}
             <button onClick={addVariant}

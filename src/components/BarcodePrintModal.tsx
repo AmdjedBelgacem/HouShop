@@ -34,10 +34,16 @@ function isValidEan13Input(value: string): boolean {
 
 export default function BarcodePrintModal({ barcode, productName, productId, variantName, price, onClose }: BarcodePrintModalProps) {
   const { t } = useI18n();
-  const [paperKey, setPaperKey] = useState<PaperPreset['key']>('medium');
+  // 25×17mm is the default — it's the tag the shop actually uses. shiftX defaults
+  // to 20 internally (this printhead clips the barcode at 0), but the H-Shift
+  // field displays it as 0 (i.e. relative to this default) so the user sees a
+  // clean baseline. HSHIFT_DISPLAY_OFFSET keeps the two in sync.
+  const HSHIFT_DISPLAY_OFFSET = 20;
+  const [paperKey, setPaperKey] = useState<PaperPreset['key']>('small');
   const [printers, setPrinters] = useState<string[]>([]);
   const [printerName, setPrinterName] = useState<string>('');
-  const [tunables, setTunables] = useState({ density: 8, direction: 0, shift: 0, shiftX: 0 });
+  const [tunables, setTunables] = useState({ density: 8, direction: 0, shift: 0, shiftX: HSHIFT_DISPLAY_OFFSET });
+  const [copies, setCopies] = useState(1);
   const [visibility, setVisibility] = useState<LabelVisibility>({
     name: true,
     variant: true,
@@ -126,6 +132,7 @@ export default function BarcodePrintModal({ barcode, productName, productId, var
     labelWidthMm: paper.widthMm,
     labelHeightMm: paper.heightMm,
     gapMm: paper.gapMm,
+    copies,
   };
 
   // True preview: render the exact same bitmap the printer will output, shown
@@ -142,6 +149,9 @@ export default function BarcodePrintModal({ barcode, productName, productId, var
         variantName: effectiveVariantName,
         price: effectivePrice,
         shiftX: tunables.shiftX,
+        // Preview always shows the content centered; the print path keeps the
+        // real shift (needed to avoid clipping on this printhead).
+        previewCentered: true,
         visibility,
         styling,
         barcodeSize,
@@ -521,10 +531,12 @@ export default function BarcodePrintModal({ barcode, productName, productId, var
                 />
                 <NumberField
                   label="H-Shift"
-                  value={tunables.shiftX}
+                  // Display is relative to the printhead's default offset, so the
+                  // baseline reads 0 (the actual stored value is +offset).
+                  value={tunables.shiftX - HSHIFT_DISPLAY_OFFSET}
                   min={-50}
                   max={50}
-                  onChange={v => setTunables(o => ({ ...o, shiftX: v }))}
+                  onChange={v => setTunables(o => ({ ...o, shiftX: v + HSHIFT_DISPLAY_OFFSET }))}
                   hint="− = left, + = right"
                 />
               </div>
@@ -533,7 +545,41 @@ export default function BarcodePrintModal({ barcode, productName, productId, var
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border bg-card">
+        <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-border bg-card">
+          {/* Copies: how many identical labels to print from the same barcode. */}
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-semibold text-text-secondary">Copies</span>
+            <div className="flex items-center border border-border rounded-lg overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setCopies(c => Math.max(1, c - 1))}
+                disabled={copies <= 1 || printing}
+                className="w-7 h-7 flex items-center justify-center text-text-secondary hover:bg-surface disabled:opacity-40"
+              >
+                −
+              </button>
+              <input
+                type="number"
+                min={1}
+                max={999}
+                value={copies}
+                onChange={e => {
+                  const n = parseInt(e.target.value, 10);
+                  setCopies(Number.isFinite(n) && n > 0 ? Math.min(999, n) : 1);
+                }}
+                disabled={printing}
+                className="w-12 h-7 text-center text-[12px] font-medium text-text-primary border-x border-border bg-card focus:outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+              />
+              <button
+                type="button"
+                onClick={() => setCopies(c => Math.min(999, c + 1))}
+                disabled={copies >= 999 || printing}
+                className="w-7 h-7 flex items-center justify-center text-text-secondary hover:bg-surface disabled:opacity-40"
+              >
+                +
+              </button>
+            </div>
+          </div>
           <button
             onClick={onPrint}
             disabled={printing || !!barcodeError || !printerName}

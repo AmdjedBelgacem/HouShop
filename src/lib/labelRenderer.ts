@@ -71,6 +71,12 @@ export interface RenderLabelInput {
    * centered on the physical label. Default 0.
    */
   shiftX?: number;
+  /**
+   * Preview-only: when true, `shiftX` is ignored so the on-screen preview shows
+   * the content visually centered (the print path keeps the real shift, which is
+   * needed to avoid clipping on this printhead). Print never sets this.
+   */
+  previewCentered?: boolean;
   /** Per-element visibility. Omit for "show everything". */
   visibility?: LabelVisibility;
   /** Per-element font scale + vertical offset overrides. Omit for defaults. */
@@ -264,11 +270,20 @@ function drawLabel(
   bsize: Required<BarcodeSize>,
 ) {
   const { barcode, productName, variantName, price, widthPx, heightPx } = input;
-  // Base offset of -40 dots compensates for this Xprinter's printhead-to-label
-  // registration offset (content prints ~5mm right of center at 203 DPI). The
-  // user-facing H-Shift control is relative to this base, so UI value 0 already
-  // includes the correction. Effective shift = userValue - 40.
-  const shiftX = Math.round((input.shiftX ?? 0) - 40);
+  // Horizontal shift. The base registration correction was a flat -40 dots
+  // (calibrated for the 35×34mm label); on the narrower 25×17mm tag that same
+  // -40 over-shifted content off the right edge and clipped the barcode. We now
+  // scale the base by label width so each label gets a proportionate correction,
+  // then add the user's H-Shift on top. Effective shift = userValue + base,
+  // where base ≈ -0.143 × widthPx (≈ -40 at 280px, ≈ -28 at 200px).
+  //
+  // `previewCentered`: when true (on-screen preview only), the user's H-Shift is
+  // ignored and only the base correction is applied, so the preview always shows
+  // the content centered — even though the printed label keeps the real shift
+  // (needed to avoid clipping on this printhead). Print never sets this.
+  const baseShiftX = Math.round(-0.143 * widthPx);
+  const userShift = input.previewCentered ? 0 : (input.shiftX ?? 0);
+  const shiftX = Math.round(userShift + baseShiftX);
 
   // --- Step 1a: white background, crisp settings ---------------------------
   ctx.fillStyle = '#ffffff';
@@ -381,12 +396,15 @@ function drawLabel(
   if (barCanvas) {
     cursorY += gapPriceBar;
     // Draw at the same effective width used during measurement so the layout
-    // (centering, total height) matches what was computed above.
+    // (centering, total height) matches what was computed above. A small fixed
+    // downward nudge (4 dots) sits the barcode just under the price/number text
+    // — on small labels the centered block left the bars a touch too high.
     const scale = barAreaWidth / barCanvas.width;
     const drawW = Math.floor(barCanvas.width * scale);
     const drawH = Math.floor(barCanvas.height * scale);
     const dx = Math.floor((widthPx - drawW) / 2) + shiftX;
-    ctx.drawImage(barCanvas, dx, cursorY, drawW, drawH);
+    const dy = cursorY + 4;
+    ctx.drawImage(barCanvas, dx, dy, drawW, drawH);
   }
 }
 

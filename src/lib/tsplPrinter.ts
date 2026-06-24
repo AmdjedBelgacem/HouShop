@@ -18,6 +18,8 @@ export interface TsplPrintOpts {
   labelHeightMm: number;
   labelWidthMm: number;
   gapMm: number;
+  /** Number of copies of the same label (TSPL `PRINT copies,1`). */
+  copies: number;
 }
 
 /** Standard Xprinter label resolutions (dots per inch). */
@@ -107,6 +109,7 @@ export async function printLabel(
       label_height_mm: opts.labelHeightMm,
       label_width_mm: opts.labelWidthMm,
       gap_mm: opts.gapMm,
+      copies: opts.copies,
     },
   });
 }

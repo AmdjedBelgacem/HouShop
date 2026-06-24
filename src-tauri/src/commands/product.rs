@@ -369,3 +369,37 @@ fn normalize_optional(s: &Option<String>) -> Option<String> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
 }
+
+/// Check whether a barcode is already used by any variant. Barcodes must be
+/// unique across the whole catalog (two products can't share one), enforced by a
+/// unique partial index; this command lets the frontend detect collisions before
+/// saving (e.g. when auto-generating) instead of failing the insert.
+///
+/// `exclude_variant_id` lets a variant "keep" its own barcode when editing.
+#[tauri::command]
+pub async fn is_barcode_taken(
+    pool: State<'_, SqlitePool>,
+    barcode: String,
+    exclude_variant_id: Option<i64>,
+) -> Result<bool, String> {
+    let barcode = barcode.trim();
+    if barcode.is_empty() {
+        return Ok(false);
+    }
+    let taken: (i64,) = match exclude_variant_id {
+        Some(vid) => sqlx::query_as(
+            "SELECT COUNT(*) FROM product_variants WHERE barcode = ? AND id != ?",
+        )
+        .bind(barcode)
+        .bind(vid)
+        .fetch_one(pool.inner())
+        .await
+        .map_err(|e| format!("Failed to check barcode: {}", e))?,
+        None => sqlx::query_as("SELECT COUNT(*) FROM product_variants WHERE barcode = ?")
+            .bind(barcode)
+            .fetch_one(pool.inner())
+            .await
+            .map_err(|e| format!("Failed to check barcode: {}", e))?,
+    };
+    Ok(taken.0 > 0)
+}

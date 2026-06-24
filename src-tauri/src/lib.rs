@@ -30,6 +30,7 @@ pub fn run() {
             commands::product::create_category,
             commands::product::delete_category,
             commands::product::get_product_variants,
+            commands::product::is_barcode_taken,
             commands::reservation::get_reservations,
             commands::reservation::get_active_reservations,
             commands::reservation::create_reservation,

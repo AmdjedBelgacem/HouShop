@@ -31,6 +31,9 @@ pub struct PrintOpts {
     pub label_width_mm: f32,
     /// Gap between labels in millimetres (die-cut liner gap). Default 2.0.
     pub gap_mm: f32,
+    /// Number of copies to print of the same label (TSPL `PRINT copies,1`).
+    /// Clamped to ≥1 on use. Default 1.
+    pub copies: u32,
 }
 
 impl Default for PrintOpts {
@@ -43,6 +46,7 @@ impl Default for PrintOpts {
             label_height_mm: 45.0,
             label_width_mm: 35.0,
             gap_mm: 2.0,
+            copies: 1,
         }
     }
 }
@@ -311,7 +315,10 @@ fn build_tspl_payload(
     out.extend_from_slice(packed_bytes);
     out.push(b'\n');
 
-    cmd(&mut out, "PRINT 1,1");
+    // PRINT <copies>,1 — print the rendered label `copies` times. The renderer
+    // is unchanged across copies (same bitmap), so copies is purely a repeat.
+    let copies = if opts.copies == 0 { 1 } else { opts.copies };
+    cmd(&mut out, &format!("PRINT {},1", copies));
     Ok(out)
 }
 
