@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
@@ -58,6 +58,11 @@ export default function Sales() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [deleteMode, setDeleteMode] = useState(false);
   const [menuOpenId, setMenuOpenId] = useState<number | null>(null);
+  // Fixed-position menu: anchored to the ⋯ button via getBoundingClientRect so
+  // it escapes the table's overflow-x-auto/overflow-hidden clipping ancestors
+  // and always sits on top of the container.
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
+  const menuBtnRefs = useRef<Record<number, HTMLButtonElement | null>>({});
   const [invoiceSale, setInvoiceSale] = useState<SaleWithItems | null>(null);
   const [shippingSale, setShippingSale] = useState<SaleWithItems | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SaleWithItems | null>(null);
@@ -74,6 +79,28 @@ export default function Sales() {
     onError: () => toast.error(t('toast.error')),
   });
   const handleDeleteSale = (s: SaleWithItems) => setDeleteTarget(s);
+  // Position the fixed dropdown at the button's bottom-left corner and open it.
+  const openMenu = (id: number) => {
+    const btn = menuBtnRefs.current[id];
+    if (btn) {
+      const r = btn.getBoundingClientRect();
+      // left keeps the ~160px menu on-screen when the button is far right.
+      const left = Math.max(8, Math.min(r.left, window.innerWidth - 176));
+      setMenuPos({ top: r.bottom + 4, left });
+    }
+    setMenuOpenId(id);
+  };
+  // Close the menu on scroll/resize so it never floats detached from its row.
+  useEffect(() => {
+    if (menuOpenId == null) return;
+    const close = () => setMenuOpenId(null);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [menuOpenId]);
   const { data: sales } = useQuery({
     queryKey: ['sales'],
     queryFn: () => invoke<SaleWithItems[]>('get_sales'),
@@ -309,39 +336,12 @@ export default function Sales() {
                           ) : (
                             <div className="relative inline-block">
                               <button
-                                onClick={(e) => { e.stopPropagation(); setMenuOpenId(menuOpenId === s.sale.id ? null : s.sale.id); }}
+                                ref={(el) => { menuBtnRefs.current[s.sale.id] = el; }}
+                                onClick={(e) => { e.stopPropagation(); if (menuOpenId === s.sale.id) setMenuOpenId(null); else openMenu(s.sale.id); }}
                                 className="p-1 rounded hover:bg-surface transition-colors text-text-muted"
                               >
                                 <MoreHorizontal size={16} />
                               </button>
-                              {menuOpenId === s.sale.id && (
-                                <>
-                                  <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setMenuOpenId(null); }} />
-                                  <div className="absolute right-0 top-full mt-1 bg-card border border-border rounded-xl shadow-lg z-40 min-w-[160px] overflow-hidden">
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); setInvoiceSale(s); setMenuOpenId(null); }}
-                                      className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-text-primary hover:bg-surface transition-colors text-left"
-                                    >
-                                      <Printer size={14} className="text-text-muted" />
-                                      {t('checkout.printInvoice')}
-                                    </button>
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); setShippingSale(s); setMenuOpenId(null); }}
-                                      className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-text-primary hover:bg-surface transition-colors text-left"
-                                    >
-                                      <Printer size={14} className="text-text-muted" />
-                                      {t('shipping.printLabel')}
-                                    </button>
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); handleDeleteSale(s); setMenuOpenId(null); }}
-                                      className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-accent-red hover:bg-red-50 transition-colors text-left"
-                                    >
-                                      <Trash2 size={14} />
-                                      {t('sales.deleteTransaction', { id: 90000 + s.sale.id })}
-                                    </button>
-                                  </div>
-                                </>
-                              )}
                             </div>
                           )}
                         </td>
@@ -476,6 +476,45 @@ export default function Sales() {
         onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.sale.id)}
         onCancel={() => setDeleteTarget(null)}
       />
+
+      {/* Fixed-position row actions menu — rendered once at the root so it floats
+          above the table's overflow scroll container instead of being clipped. */}
+      {menuOpenId != null && menuPos && (() => {
+        const s = (sales ?? []).find(x => x.sale.id === menuOpenId);
+        if (!s) return null;
+        return (
+          <>
+            <div className="fixed inset-0 z-[150]" onClick={() => setMenuOpenId(null)} />
+            <div
+              className="fixed z-[160] bg-card border border-border rounded-xl shadow-xl min-w-[176px] overflow-hidden py-1"
+              style={{ top: menuPos.top, left: menuPos.left }}
+            >
+              <button
+                onClick={() => { setInvoiceSale(s); setMenuOpenId(null); }}
+                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-text-primary hover:bg-surface transition-colors text-left"
+              >
+                <Printer size={14} className="text-text-muted" />
+                {t('checkout.printInvoice')}
+              </button>
+              <button
+                onClick={() => { setShippingSale(s); setMenuOpenId(null); }}
+                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-text-primary hover:bg-surface transition-colors text-left"
+              >
+                <Printer size={14} className="text-text-muted" />
+                {t('shipping.printLabel')}
+              </button>
+              <div className="h-px bg-border my-1" />
+              <button
+                onClick={() => { handleDeleteSale(s); setMenuOpenId(null); }}
+                className="w-full flex items-center gap-2.5 px-4 py-2.5 text-[12.5px] text-accent-red hover:bg-red-50 transition-colors text-left"
+              >
+                <Trash2 size={14} />
+                {t('sales.deleteTransaction', { id: 90000 + s.sale.id })}
+              </button>
+            </div>
+          </>
+        );
+      })()}
     </div>
   );
 }

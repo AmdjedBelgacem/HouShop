@@ -4,7 +4,7 @@ import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { useI18n } from '../i18n';
 import type { Product, Category, ProductVariant, CreateSale, Sale, SaleItemWithProduct, Customer } from '../lib/types';
-import { Plus, Minus, X, ShoppingCart, Package, Pencil, Check, Layers, Printer } from 'lucide-react';
+import { Plus, Minus, X, ShoppingCart, Package, Layers, Printer } from 'lucide-react';
 import SaleCompletionModal from '../components/SaleCompletionModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import Invoice from '../components/Invoice';
@@ -21,7 +21,6 @@ interface CartItem {
   variant: ProductVariant | null;
   quantity: number;
   customPrice: number;
-  editingPrice: boolean;
 }
 function getCoverImage(imagePath: string | null): string | null {
   if (!imagePath) return null;
@@ -38,7 +37,6 @@ export default function Checkout({ scannedProduct, scannedVariant, onScanHandled
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card'>('cash');
   const [activeCategory, setActiveCategory] = useState<string>('all');
   const [variantPicker, setVariantPicker] = useState<{ product: Product; variants: ProductVariant[] } | null>(null);
-  const [tempPrice, setTempPrice] = useState('');
   const [showCompletionModal, setShowCompletionModal] = useState(false);
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
   const [showInvoice, setShowInvoice] = useState(false);
@@ -112,7 +110,7 @@ export default function Checkout({ scannedProduct, scannedVariant, onScanHandled
         });
       }
       const price = variant ? variant.selling_price : product.selling_price;
-      return [...prev, { product, variant, quantity: 1, customPrice: price, editingPrice: false }];
+      return [...prev, { product, variant, quantity: 1, customPrice: price }];
     });
     setVariantPicker(null);
   };
@@ -159,17 +157,11 @@ export default function Checkout({ scannedProduct, scannedVariant, onScanHandled
   const removeFromCart = (idx: number) => {
     setCart(prev => prev.filter((_, i) => i !== idx));
   };
-  const startEditPrice = (idx: number) => {
-    setTempPrice(cart[idx].customPrice.toString());
-    setCart(prev => prev.map((item, i) => i === idx ? { ...item, editingPrice: true } : item));
-  };
-  const savePrice = (idx: number) => {
-    const newPrice = parseFloat(tempPrice);
-    if (isNaN(newPrice) || newPrice < 0) return;
-    setCart(prev => prev.map((item, i) => i === idx ? { ...item, customPrice: newPrice, editingPrice: false } : item));
-  };
-  const cancelEditPrice = (idx: number) => {
-    setCart(prev => prev.map((item, i) => i === idx ? { ...item, editingPrice: false } : item));
+  // Directly set a line's selling price — used for per-item discounts. The
+  // input is always visible; invalid/empty values are ignored (≥0 enforced).
+  const setPrice = (idx: number, value: number) => {
+    if (!Number.isFinite(value) || value < 0) return;
+    setCart(prev => prev.map((item, i) => i === idx ? { ...item, customPrice: value } : item));
   };
   const filteredProducts = (products ?? []).filter(p => {
     if (activeCategory === 'all') return true;
@@ -332,32 +324,16 @@ export default function Checkout({ scannedProduct, scannedVariant, onScanHandled
                   </div>
                   {}
                   <div className="flex items-center gap-1.5 mt-1">
-                    {item.editingPrice ? (
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="number"
-                          value={tempPrice}
-                          onChange={(e) => setTempPrice(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') savePrice(idx);
-                            if (e.key === 'Escape') cancelEditPrice(idx);
-                          }}
-                          className="w-20 px-1.5 py-0.5 text-[12px] border border-navy rounded focus:outline-none"
-                          autoFocus
-                        />
-                        <button onClick={() => savePrice(idx)} className="text-accent-green hover:text-green-700">
-                          <Check size={14} />
-                        </button>
-                        <button onClick={() => cancelEditPrice(idx)} className="text-accent-red hover:text-red-700">
-                          <X size={14} />
-                        </button>
-                      </div>
-                    ) : (
-                      <button onClick={() => startEditPrice(idx)} className="flex items-center gap-1 group">
-                        <span className="text-[12px] font-bold text-text-primary">{fmt(item.customPrice)}</span>
-                        <Pencil size={10} className="text-text-muted opacity-0 group-hover:opacity-100 transition-opacity" />
-                      </button>
-                    )}
+                    <label className="text-[10px] text-text-muted">Price</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={item.customPrice}
+                      onChange={(e) => setPrice(idx, parseFloat(e.target.value))}
+                      className="w-20 px-1.5 py-0.5 text-[12px] font-semibold border border-border rounded focus:outline-none focus:border-navy focus:ring-1 focus:ring-navy bg-card"
+                    />
+                    <span className="text-[10px] text-text-muted">DA</span>
                     {item.variant && item.customPrice !== item.variant.selling_price && (
                       <span className="text-[10px] text-text-muted line-through">{fmt(item.variant.selling_price)}</span>
                     )}

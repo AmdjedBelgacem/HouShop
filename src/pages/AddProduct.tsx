@@ -120,6 +120,8 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
   });
   useEffect(() => {
     if (isEditing && existingVariants) {
+      // Existing variants start collapsed — only the one the merchant opens
+      // expands, keeping a long edit list scannable.
       setVariants(existingVariants.map(v => ({
         id: v.id,
         variant_name: v.variant_name,
@@ -132,7 +134,7 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
         image_path: v.image_path ?? undefined,
         low_stock_threshold: v.low_stock_threshold,
         _id: v.id,
-        _expanded: true,
+        _expanded: false,
       })));
     }
   }, [existingVariants, isEditing]);
@@ -286,7 +288,12 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
   };
 
   const addVariant = () => {
-    setVariants(prev => [...prev, makeBlankVariant(form.name, generateSkuValue, generateBarcodeValue)]);
+    // Collapse all existing variants so the form stays compact, then append a
+    // single expanded blank variant the merchant can fill in right away.
+    setVariants(prev => [
+      ...prev.map(v => ({ ...v, _expanded: false })),
+      makeBlankVariant(form.name, generateSkuValue, generateBarcodeValue),
+    ]);
     // Make the new variant's barcode catalog-unique. Fresh variant has no id,
     // so no exclusion — the unique DB index is the final guard on save.
     generateUniqueBarcode().then(bc => {
@@ -603,16 +610,9 @@ function VariantCard({
             </Field>
           </div>
 
-          <div className="grid grid-cols-2 gap-2.5">
-            <Field label={t('addProduct.alertThresholdLabel')}>
-              <input type="number" value={variant.low_stock_threshold ?? 5} onChange={(e) => onChange({ low_stock_threshold: parseInt(e.target.value) || 5 })}
-                placeholder="5" className="form-input !py-1.5 !text-[12px]" />
-            </Field>
-            <div className="flex items-end">
-              <div className="w-full px-2.5 py-1.5 rounded-lg bg-surface border border-border-light text-[11px] text-text-muted">
-                {t('addProduct.profitPerUnit')} <span className="font-bold text-accent-green">{profit.toFixed(0)} DA</span> <span className="text-text-muted">({profitPct}%)</span>
-              </div>
-            </div>
+          {/* Profit readout (threshold is no longer surfaced in the UI). */}
+          <div className="w-full px-2.5 py-1.5 rounded-lg bg-surface border border-border-light text-[11px] text-text-muted">
+            {t('addProduct.profitPerUnit')} <span className="font-bold text-accent-green">{profit.toFixed(0)} DA</span> <span className="text-text-muted">({profitPct}%)</span>
           </div>
 
           {/* Variant image */}

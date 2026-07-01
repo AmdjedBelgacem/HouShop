@@ -26,6 +26,7 @@ pub fn run() {
             commands::product::create_product,
             commands::product::update_product,
             commands::product::delete_product,
+            commands::product::delete_variant,
             commands::product::get_categories,
             commands::product::create_category,
             commands::product::delete_category,

@@ -5,9 +5,49 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import { renderLabelToBitmap, type RenderLabelInput } from './labelRenderer';
+import { renderLabelToBitmap, type RenderLabelInput, type LabelVisibility, type LabelStyling, type BarcodeSize } from './labelRenderer';
 
 const SAVED_PRINTER_KEY = 'tspl_printer_name';
+const SAVED_LABEL_SETTINGS_KEY = 'tspl_label_settings';
+
+/**
+ * Persisted label settings. Everything except `copies` is remembered between
+ * print sessions so the merchant doesn't re-enter paper/visibility/styling on
+ * every label. `copies` is intentionally excluded (it's per-run).
+ */
+export interface SavedLabelSettings {
+  paperKey: PaperPreset['key'];
+  density: number;
+  direction: number;
+  shift: number;
+  shiftX: number;
+  visibility: LabelVisibility;
+  styling: LabelStyling;
+  barcodeSize: BarcodeSize;
+  combineNameVariant: boolean;
+}
+
+/** Load the saved label settings, or null if none stored yet. */
+export function getSavedLabelSettings(): SavedLabelSettings | null {
+  try {
+    const raw = localStorage.getItem(SAVED_LABEL_SETTINGS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') return parsed as SavedLabelSettings;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Persist label settings for the next print session (copies excluded). */
+export function setSavedLabelSettings(settings: SavedLabelSettings): void {
+  try {
+    localStorage.setItem(SAVED_LABEL_SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    // Storage unavailable / quota — non-fatal; the print still went through.
+  }
+}
 
 /** Mirror of `PrintOpts` in `src-tauri/src/commands/printer.rs`. */
 export interface TsplPrintOpts {

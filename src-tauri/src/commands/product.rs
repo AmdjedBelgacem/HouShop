@@ -343,6 +343,41 @@ pub async fn delete_product(pool: State<'_, SqlitePool>, id: i64) -> Result<(), 
     Ok(())
 }
 
+/// Delete a single variant. A product must keep at least one variant (it's the
+/// sellable unit), so this refuses to remove the last one. Related rows are safe:
+/// `sale_items.variant_id` and `returns.variant_id` are `ON DELETE SET NULL`,
+/// and `inventory_transactions.variant_id` has no FK constraint.
+#[tauri::command]
+pub async fn delete_variant(
+    pool: State<'_, SqlitePool>,
+    id: i64,
+) -> Result<(), String> {
+    // Guard: never leave a product with zero variants (it'd be unsellable).
+    let parent: Option<(i64,)> = sqlx::query_as("SELECT product_id FROM product_variants WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool.inner())
+        .await
+        .map_err(|e| format!("Failed to find variant: {}", e))?;
+    let product_id = match parent {
+        Some((pid,)) => pid,
+        None => return Ok(()), // already gone — idempotent
+    };
+    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM product_variants WHERE product_id = ?")
+        .bind(product_id)
+        .fetch_one(pool.inner())
+        .await
+        .map_err(|e| format!("Failed to count variants: {}", e))?;
+    if count.0 <= 1 {
+        return Err("Cannot delete the last variant of a product".to_string());
+    }
+    sqlx::query("DELETE FROM product_variants WHERE id = ?")
+        .bind(id)
+        .execute(pool.inner())
+        .await
+        .map_err(|e| format!("Failed to delete variant: {}", e))?;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn get_product_variants(
     pool: State<'_, SqlitePool>,

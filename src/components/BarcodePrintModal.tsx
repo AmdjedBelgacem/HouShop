@@ -6,6 +6,8 @@ import {
   PAPER_PRESETS,
   getSavedPrinter,
   setSavedPrinter,
+  getSavedLabelSettings,
+  setSavedLabelSettings,
   listPrinters,
   printLabel,
   mmToDots,
@@ -32,6 +34,21 @@ function isValidEan13Input(value: string): boolean {
   return /^\d{12,13}$/.test(value);
 }
 
+// The price element's font is rendered 1.4× its base size by default (the scale
+// that looks right on these tags), but the UI shows it as 1.0× so the baseline
+// reads cleanly — the merchant only sees numbers above/below that reference.
+const PRICE_DEFAULT_FONT_SCALE = 1.4;
+
+/** Map an internal price fontScale to the value shown in the stepper. */
+function priceFontScaleToDisplay(v: number): number {
+  // 1.4 → 1.0; everything else is shown relative to that same offset.
+  return Number((v / PRICE_DEFAULT_FONT_SCALE).toFixed(2));
+}
+/** Inverse of priceFontScaleToDisplay: turn a displayed value back to internal. */
+function priceFontScaleFromDisplay(v: number): number {
+  return Number((v * PRICE_DEFAULT_FONT_SCALE).toFixed(2));
+}
+
 export default function BarcodePrintModal({ barcode, productName, productId, variantName, price, onClose }: BarcodePrintModalProps) {
   const { t } = useI18n();
   // 25×17mm is the default — it's the tag the shop actually uses. shiftX defaults
@@ -39,12 +56,20 @@ export default function BarcodePrintModal({ barcode, productName, productId, var
   // field displays it as 0 (i.e. relative to this default) so the user sees a
   // clean baseline. HSHIFT_DISPLAY_OFFSET keeps the two in sync.
   const HSHIFT_DISPLAY_OFFSET = 20;
-  const [paperKey, setPaperKey] = useState<PaperPreset['key']>('small');
+  // Restore the last-used settings so the merchant doesn't re-enter paper/
+  // visibility/styling on every label. `copies` is NOT restored (per-run).
+  const saved = getSavedLabelSettings();
+  const [paperKey, setPaperKey] = useState<PaperPreset['key']>(saved?.paperKey ?? 'small');
   const [printers, setPrinters] = useState<string[]>([]);
   const [printerName, setPrinterName] = useState<string>('');
-  const [tunables, setTunables] = useState({ density: 8, direction: 0, shift: 0, shiftX: HSHIFT_DISPLAY_OFFSET });
+  const [tunables, setTunables] = useState({
+    density: saved?.density ?? 8,
+    direction: saved?.direction ?? 0,
+    shift: saved?.shift ?? 0,
+    shiftX: saved?.shiftX ?? HSHIFT_DISPLAY_OFFSET,
+  });
   const [copies, setCopies] = useState(1);
-  const [visibility, setVisibility] = useState<LabelVisibility>({
+  const [visibility, setVisibility] = useState<LabelVisibility>(saved?.visibility ?? {
     name: true,
     variant: true,
     price: true,
@@ -52,15 +77,17 @@ export default function BarcodePrintModal({ barcode, productName, productId, var
   });
   // Per-element styling: fontScale (1 = default) and offsetY (dots, +down/-up).
   // Resides under "Text & position" — independent of the visibility toggles.
-  const [styling, setStyling] = useState<LabelStyling>({
+  // The price font defaults to 1.4× (the size that looks right on these tags)
+  // but the stepper displays it as 1.0× so the baseline reads cleanly.
+  const [styling, setStyling] = useState<LabelStyling>(saved?.styling ?? {
     name: { fontScale: 1, offsetY: 0 },
     variant: { fontScale: 1, offsetY: 0 },
-    price: { fontScale: 1, offsetY: 0 },
+    price: { fontScale: PRICE_DEFAULT_FONT_SCALE, offsetY: 0 },
   });
   // Barcode sizing: independent width/height multipliers + a uniform scale.
   // Defaults to 1/1/1 (full width, default bar height). Height/scale < 1 shrink
   // the bars — handy on 25×17mm tags where the default height can feel large.
-  const [barcodeSize, setBarcodeSize] = useState<BarcodeSize>({
+  const [barcodeSize, setBarcodeSize] = useState<BarcodeSize>(saved?.barcodeSize ?? {
     widthScale: 1,
     heightScale: 1,
     scale: 1,
@@ -73,7 +100,8 @@ export default function BarcodePrintModal({ barcode, productName, productId, var
   const [showBarcodeSize, setShowBarcodeSize] = useState(false);
   // When true, the variant title is merged into the product name as a single
   // inline title line ("Product — Variant") instead of a separate subtitle.
-  const [combineNameVariant, setCombineNameVariant] = useState(false);
+  // Defaults on (selected) per the requested default.
+  const [combineNameVariant, setCombineNameVariant] = useState<boolean>(saved?.combineNameVariant ?? true);
 
   // Variants for this product (fetched on mount when productId is provided).
   const [variants, setVariants] = useState<ProductVariant[]>([]);
@@ -237,6 +265,18 @@ export default function BarcodePrintModal({ barcode, productName, productId, var
         paper,
         opts,
       );
+      // Remember everything for next time — except copies (that's per-run).
+      setSavedLabelSettings({
+        paperKey,
+        density: tunables.density,
+        direction: tunables.direction,
+        shift: tunables.shift,
+        shiftX: tunables.shiftX,
+        visibility,
+        styling,
+        barcodeSize,
+        combineNameVariant,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -384,10 +424,12 @@ export default function BarcodePrintModal({ barcode, productName, productId, var
                 />
                 <StyleRow
                   label="Price"
-                  fontScale={styling.price?.fontScale ?? 1}
+                  // Price renders 1.4× internally but the stepper shows it as 1.0×,
+                  // so convert at the boundary (display in, internal out).
+                  fontScale={priceFontScaleToDisplay(styling.price?.fontScale ?? PRICE_DEFAULT_FONT_SCALE)}
                   offsetY={styling.price?.offsetY ?? 0}
                   disabled={!visibility.price || price == null || price <= 0}
-                  onChange={(fs, oy) => setStyling(s => ({ ...s, price: { fontScale: fs, offsetY: oy } }))}
+                  onChange={(fs, oy) => setStyling(s => ({ ...s, price: { fontScale: priceFontScaleFromDisplay(fs), offsetY: oy } }))}
                 />
               </div>
             )}

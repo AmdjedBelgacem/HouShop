@@ -9,7 +9,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import { useI18n } from '../i18n';
 import {
   Search, Plus, Edit3, Trash2, PackagePlus, X,
-  ArrowUpDown, AlertCircle, ScanBarcode, Layers,
+  ArrowUpDown, ScanBarcode, Layers, ChevronDown, ChevronUp,
 } from 'lucide-react';
 
 interface ProductsProps {
@@ -24,10 +24,16 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
   const [categoryFilter, setCategoryFilter] = useState<number | null>(null);
   const [showStock, setShowStock] = useState(false);
   const [stockProduct, setStockProduct] = useState<Product | null>(null);
-  const [sortField, setSortField] = useState<'name' | 'quantity' | 'selling_price'>('name');
+  const [sortField, setSortField] = useState<'name' | 'quantity' | 'cost_price' | 'selling_price'>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [barcodeProduct, setBarcodeProduct] = useState<Product | null>(null);
+  // When printing from an expanded variant row, preselect that variant.
+  const [barcodeVariantName, setBarcodeVariantName] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null);
+  // Expanded product row: fetch its variants lazily and show inline actions.
+  const [expandedProductId, setExpandedProductId] = useState<number | null>(null);
+  // Variant targeted for deletion (from an expanded row).
+  const [deleteVariantTarget, setDeleteVariantTarget] = useState<ProductVariant | null>(null);
 
   const { data: products, isLoading } = useQuery({
     queryKey: ['products', search],
@@ -45,12 +51,39 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['products'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
-      queryClient.invalidateQueries({ queryKey: ['low-stock'] });
       setDeleteTarget(null);
       toast.success(t('toast.productDeleted'));
     },
     onError: () => toast.error(t('toast.error')),
   });
+
+  // Variants for the currently expanded product row. Fetched lazily so opening
+  // one row doesn't pay for the whole catalog's variants up front.
+  const { data: expandedVariants } = useQuery({
+    queryKey: ['product-variants', expandedProductId],
+    queryFn: () => invoke<ProductVariant[]>('get_product_variants', { productId: expandedProductId! }),
+    enabled: expandedProductId != null,
+  });
+
+  // Delete a single variant from an expanded row (without editing the product).
+  const deleteVariantMutation = useMutation({
+    mutationFn: (id: number) => invoke('delete_variant', { id }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['product-variants'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
+      setDeleteVariantTarget(null);
+      toast.success('Variant deleted');
+    },
+    onError: () => toast.error(t('toast.error')),
+  });
+
+  // Open the barcode modal scoped to a specific variant. Passing the variant
+  // name makes the modal default-select that variant's label.
+  const printVariantBarcode = (p: Product, v: ProductVariant) => {
+    setBarcodeProduct(p);
+    setBarcodeVariantName(v.variant_name);
+  };
 
   const [stockForm, setStockForm] = useState({ quantity: '', unit_cost: '', notes: '' });
   // Variants for the product currently in the restock modal, so the merchant
@@ -108,9 +141,6 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
       if (sortField === 'name') return a.name.localeCompare(b.name) * mul;
       return ((a[sortField] as number) - (b[sortField] as number)) * mul;
     });
-  // Header badge: count products whose aggregate quantity is at/below their
-  // threshold (approximation of the backend's "any variant low" rule).
-  const lowStockCount = (products ?? []).filter(p => p.quantity <= p.low_stock_threshold).length;
 
   return (
     <div className="p-8">
@@ -126,7 +156,7 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
         </button>
       </div>
 
-      <div className="grid grid-cols-3 gap-5 mb-6">
+      <div className="grid grid-cols-2 gap-5 mb-6">
         <div className="card px-5 py-3.5">
           <p className="text-[10.5px] font-semibold text-text-muted tracking-[0.08em] uppercase">Total Products</p>
           <p className="text-[20px] font-bold text-text-primary mt-0.5">{products?.length ?? 0}</p>
@@ -134,13 +164,6 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
         <div className="card px-5 py-3.5">
           <p className="text-[10.5px] font-semibold text-text-muted tracking-[0.08em] uppercase">Categories</p>
           <p className="text-[20px] font-bold text-text-primary mt-0.5">{categories?.length ?? 0}</p>
-        </div>
-        <div className="card px-5 py-3.5">
-          <p className="text-[10.5px] font-semibold text-text-muted tracking-[0.08em] uppercase">Low Stock Alerts</p>
-          <div className="flex items-center gap-2 mt-0.5">
-            <p className="text-[20px] font-bold text-text-primary">{lowStockCount}</p>
-            {lowStockCount > 0 && <AlertCircle size={16} className="text-accent-red" />}
-          </div>
         </div>
       </div>
 
@@ -177,6 +200,9 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
                 <th className="text-right py-3 px-4 text-text-muted font-semibold text-[11px] uppercase tracking-wider cursor-pointer select-none" onClick={() => toggleSort('quantity')}>
                   <span className="flex items-center justify-end gap-1.5">Stock <ArrowUpDown size={11} /></span>
                 </th>
+                <th className="text-right py-3 px-4 text-text-muted font-semibold text-[11px] uppercase tracking-wider cursor-pointer select-none" onClick={() => toggleSort('cost_price')}>
+                  <span className="flex items-center justify-end gap-1.5">Cost <ArrowUpDown size={11} /></span>
+                </th>
                 <th className="text-right py-3 px-4 text-text-muted font-semibold text-[11px] uppercase tracking-wider cursor-pointer select-none" onClick={() => toggleSort('selling_price')}>
                   <span className="flex items-center justify-end gap-1.5">Price <ArrowUpDown size={11} /></span>
                 </th>
@@ -185,61 +211,143 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
             </thead>
             <tbody>
               {isLoading ? (
-                <tr><td colSpan={6} className="py-16 text-center text-text-muted">Loading products...</td></tr>
+                <tr><td colSpan={7} className="py-16 text-center text-text-muted">Loading products...</td></tr>
               ) : filteredProducts.length === 0 ? (
-                <tr><td colSpan={6} className="py-16 text-center text-text-muted">
+                <tr><td colSpan={7} className="py-16 text-center text-text-muted">
                   <PackagePlus size={32} className="mx-auto mb-2 opacity-30" />
                   No products found
                 </td></tr>
               ) : (
-                filteredProducts.map((p) => (
-                  <tr key={p.id} className="border-b border-border-light hover:bg-sidebar/30 transition-colors">
-                    <td className="py-3 px-5 font-medium text-text-primary">{p.name}</td>
-                    <td className="py-3 px-4 text-text-secondary">{p.category_name ?? <span className="text-text-muted italic">None</span>}</td>
-                    <td className="py-3 px-4">
-                      <span className="inline-flex items-center gap-1 text-text-secondary">
-                        <Layers size={12} className="text-text-muted" />
-                        {p.variant_count}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                        p.quantity <= p.low_stock_threshold
-                          ? 'bg-red-50 text-accent-red border border-red-200'
-                          : 'bg-green-50 text-accent-green border border-green-200'
-                      }`}>
-                        {p.quantity}
-                      </span>
-                    </td>
-                    {/* Price is now a "from" aggregate across variants. */}
-                    <td className="py-3 px-4 text-right font-semibold text-text-primary">
-                      {p.variant_count > 1 && <span className="text-text-muted text-[11px] font-normal">from </span>}
-                      {p.selling_price.toFixed(2)} DA
-                    </td>
-                    <td className="py-3 px-5">
-                      <div className="flex items-center justify-end gap-1">
-                        <button onClick={() => openStock(p)}
-                          className="p-1.5 rounded-md text-accent-green hover:bg-green-50 transition-colors" title="Add Stock">
-                          <PackagePlus size={15} />
+                filteredProducts.flatMap((p) => {
+                  const isExpanded = expandedProductId === p.id;
+                  const soldOut = p.quantity <= 0;
+                  return [
+                    <tr key={p.id} className={`border-b border-border-light hover:bg-sidebar/30 transition-colors ${isExpanded ? 'bg-sidebar/30' : ''}`}>
+                      <td className="py-3 px-5 font-medium text-text-primary">
+                        <button
+                          onClick={() => setExpandedProductId(isExpanded ? null : p.id)}
+                          className="flex items-center gap-2 text-left group"
+                        >
+                          {isExpanded
+                            ? <ChevronUp size={14} className="text-text-muted flex-shrink-0" />
+                            : <ChevronDown size={14} className="text-text-muted flex-shrink-0" />}
+                          <span className="group-hover:text-navy transition-colors">{p.name}</span>
                         </button>
-                        <button onClick={() => onEditProduct(p)}
-                          className="p-1.5 rounded-md text-accent-blue hover:bg-blue-50 transition-colors" title="Edit">
-                          <Edit3 size={15} />
-                        </button>
-                        <button onClick={() => setDeleteTarget(p)}
-                          className="p-1.5 rounded-md text-accent-red hover:bg-red-50 transition-colors" title="Delete">
-                          <Trash2 size={15} />
-                        </button>
-                        {p.barcode && (
-                          <button onClick={() => setBarcodeProduct(p)}
-                            className="p-1.5 rounded-md text-text-muted hover:bg-surface transition-colors" title="Print Barcode">
-                            <ScanBarcode size={15} />
+                      </td>
+                      <td className="py-3 px-4 text-text-secondary">{p.category_name ?? <span className="text-text-muted italic">None</span>}</td>
+                      <td className="py-3 px-4">
+                        <span className="inline-flex items-center gap-1 text-text-secondary">
+                          <Layers size={12} className="text-text-muted" />
+                          {p.variant_count}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        {/* Neutral stock badge — color only signals sold-out, not a threshold. */}
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                          soldOut
+                            ? 'bg-red-50 text-accent-red border border-red-200'
+                            : 'bg-surface text-text-secondary border border-border'
+                        }`}>
+                          {p.quantity}
+                        </span>
+                      </td>
+                      {/* Cost is a "from" aggregate (min across variants). */}
+                      <td className="py-3 px-4 text-right text-text-secondary">
+                        {p.variant_count > 1 && <span className="text-text-muted text-[11px] font-normal">from </span>}
+                        {p.cost_price.toFixed(2)} DA
+                      </td>
+                      {/* Price is now a "from" aggregate across variants. */}
+                      <td className="py-3 px-4 text-right font-semibold text-text-primary">
+                        {p.variant_count > 1 && <span className="text-text-muted text-[11px] font-normal">from </span>}
+                        {p.selling_price.toFixed(2)} DA
+                      </td>
+                      <td className="py-3 px-5">
+                        <div className="flex items-center justify-end gap-1">
+                          <button onClick={() => openStock(p)}
+                            className="p-1.5 rounded-md text-accent-green hover:bg-green-50 transition-colors" title="Add Stock">
+                            <PackagePlus size={15} />
                           </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
+                          <button onClick={() => onEditProduct(p)}
+                            className="p-1.5 rounded-md text-accent-blue hover:bg-blue-50 transition-colors" title="Edit">
+                            <Edit3 size={15} />
+                          </button>
+                          <button onClick={() => setDeleteTarget(p)}
+                            className="p-1.5 rounded-md text-accent-red hover:bg-red-50 transition-colors" title="Delete">
+                            <Trash2 size={15} />
+                          </button>
+                          {p.barcode && (
+                            <button onClick={() => { setBarcodeProduct(p); setBarcodeVariantName(null); }}
+                              className="p-1.5 rounded-md text-text-muted hover:bg-surface transition-colors" title="Print Barcode">
+                              <ScanBarcode size={15} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>,
+                    // Expanded sub-row: lists each variant with its stock and
+                    // inline actions (print barcode for that variant, delete the
+                    // variant without opening the product editor).
+                    isExpanded && (
+                      <tr key={`${p.id}-variants`} className="border-b border-border-light bg-surface/40">
+                        <td colSpan={7} className="px-5 py-3">
+                          {expandedVariants === undefined ? (
+                            <p className="text-[12px] text-text-muted py-2">Loading variants…</p>
+                          ) : expandedVariants.length === 0 ? (
+                            <p className="text-[12px] text-text-muted py-2">No variants.</p>
+                          ) : (
+                            <div className="rounded-lg border border-border overflow-hidden">
+                              <table className="w-full text-[12px]">
+                                <thead>
+                                  <tr className="bg-card border-b border-border">
+                                    <th className="text-left py-2 px-4 text-text-muted font-semibold text-[10px] uppercase tracking-wider">Variant</th>
+                                    <th className="text-right py-2 px-4 text-text-muted font-semibold text-[10px] uppercase tracking-wider">Stock</th>
+                                    <th className="text-right py-2 px-4 text-text-muted font-semibold text-[10px] uppercase tracking-wider">Cost</th>
+                                    <th className="text-right py-2 px-4 text-text-muted font-semibold text-[10px] uppercase tracking-wider">Price</th>
+                                    <th className="text-right py-2 px-4 text-text-muted font-semibold text-[10px] uppercase tracking-wider">Actions</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {expandedVariants.map(v => (
+                                    <tr key={v.id} className="border-b border-border-light last:border-0 bg-card">
+                                      <td className="py-2 px-4">
+                                        <div className="flex items-center gap-2">
+                                          <Layers size={12} className="text-accent-blue flex-shrink-0" />
+                                          <span className="text-text-primary font-medium">{v.variant_name}</span>
+                                          {v.condition_note && <span className="text-text-muted text-[11px]">· {v.condition_note}</span>}
+                                        </div>
+                                      </td>
+                                      <td className="py-2 px-4 text-right text-text-secondary">{v.quantity}</td>
+                                      <td className="py-2 px-4 text-right text-text-muted">{v.cost_price.toFixed(2)} DA</td>
+                                      <td className="py-2 px-4 text-right font-semibold text-text-primary">{v.selling_price.toFixed(2)} DA</td>
+                                      <td className="py-2 px-4">
+                                        <div className="flex items-center justify-end gap-1">
+                                          {v.barcode && (
+                                            <button onClick={() => printVariantBarcode(p, v)}
+                                              className="p-1.5 rounded-md text-text-muted hover:bg-surface transition-colors" title="Print this variant's barcode">
+                                              <ScanBarcode size={14} />
+                                            </button>
+                                          )}
+                                          <button
+                                            onClick={() => setDeleteVariantTarget(v)}
+                                            disabled={expandedVariants.length <= 1}
+                                            className="p-1.5 rounded-md text-accent-red hover:bg-red-50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                                            title={expandedVariants.length <= 1 ? "Can't delete the last variant" : 'Delete variant'}
+                                          >
+                                            <Trash2 size={14} />
+                                          </button>
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ),
+                  ];
+                })
               )}
             </tbody>
           </table>
@@ -305,9 +413,10 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
           barcode={barcodeProduct.barcode}
           productName={barcodeProduct.name}
           productId={barcodeProduct.id}
+          variantName={barcodeVariantName}
           sku={barcodeProduct.sku ?? null}
           price={barcodeProduct.selling_price}
-          onClose={() => setBarcodeProduct(null)}
+          onClose={() => { setBarcodeProduct(null); setBarcodeVariantName(null); }}
         />
       )}
 
@@ -320,6 +429,17 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
         loading={deleteMutation.isPending}
         onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
         onCancel={() => setDeleteTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={!!deleteVariantTarget}
+        variant="danger"
+        title="Delete variant"
+        description={`Delete variant "${deleteVariantTarget?.variant_name ?? ''}"? This cannot be undone.`}
+        confirmLabel={t('common.delete')}
+        loading={deleteVariantMutation.isPending}
+        onConfirm={() => deleteVariantTarget && deleteVariantMutation.mutate(deleteVariantTarget.id)}
+        onCancel={() => setDeleteVariantTarget(null)}
       />
     </div>
   );
