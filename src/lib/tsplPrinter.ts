@@ -106,7 +106,7 @@ export interface PaperPreset {
 
 export const PAPER_PRESETS: PaperPreset[] = [
   { key: 'medium', label: '35×34mm', widthMm: 35, heightMm: 34, gapMm: 2 },
-  { key: 'small', label: '25×17mm', widthMm: 24.5, heightMm: 17, gapMm: 2 },
+  { key: 'small', label: '25.4×17mm', widthMm: 25.4, heightMm: 17, gapMm: 2 },
 ];
 
 /**

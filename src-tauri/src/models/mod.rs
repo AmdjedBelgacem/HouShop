@@ -313,6 +313,24 @@ pub struct ProductVariant {
     pub created_at: String,
     pub updated_at: String,
 }
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BarcodeConflictCheck {
+    pub barcode: String,
+    pub exclude_variant_id: Option<i64>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct BarcodeConflictVariant {
+    pub barcode: String,
+    pub variant_id: i64,
+    pub variant_name: String,
+    pub product_id: i64,
+    pub product_name: String,
+    pub category_name: Option<String>,
+    pub sku: Option<String>,
+    pub quantity: i64,
+    pub selling_price: f64,
+}
 /// Result of a barcode lookup: the product, plus the specific variant whose
 /// barcode matched (if the scanned barcode belongs to a variant rather than
 /// the product itself). When `variant` is `Some`, the scanner auto-selects

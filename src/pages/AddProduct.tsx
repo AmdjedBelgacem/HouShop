@@ -37,6 +37,45 @@ interface FormVariant extends VariantInput {
   _id?: number;
 }
 
+interface BarcodeConflictVariant {
+  barcode: string;
+  variant_id: number;
+  variant_name: string;
+  product_id: number;
+  product_name: string;
+  category_name: string | null;
+  sku: string | null;
+  quantity: number;
+  selling_price: number;
+}
+
+interface CatalogBarcodeConflictGroup {
+  barcode: string;
+  current: Array<{ index: number; name: string }>;
+  existing: BarcodeConflictVariant[];
+}
+
+function variantDisplayName(v: FormVariant, index: number): string {
+  return v.variant_name.trim() || `Variant ${index + 1}`;
+}
+
+function getDuplicateBarcodeGroups(variants: FormVariant[]): Array<{ barcode: string; indices: number[]; names: string[] }> {
+  const groups = new Map<string, number[]>();
+  variants.forEach((variant, index) => {
+    const barcode = variant.barcode?.trim();
+    if (!barcode) return;
+    groups.set(barcode, [...(groups.get(barcode) ?? []), index]);
+  });
+
+  return Array.from(groups.entries())
+    .filter(([, indices]) => indices.length > 1)
+    .map(([barcode, indices]) => ({
+      barcode,
+      indices,
+      names: indices.map(index => variantDisplayName(variants[index], index)),
+    }));
+}
+
 export default function AddProduct({ onBack, editProduct }: AddProductProps) {
   const isEditing = !!editProduct;
   const queryClient = useQueryClient();
@@ -54,6 +93,18 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
   const [showBarcodeModal, setShowBarcodeModal] = useState(false);
   const [createdProductId, setCreatedProductId] = useState<number | null>(null);
   const [createdVariantBarcode, setCreatedVariantBarcode] = useState<string | null>(null);
+  const [catalogBarcodeConflicts, setCatalogBarcodeConflicts] = useState<CatalogBarcodeConflictGroup[]>([]);
+  const duplicateBarcodeGroups = getDuplicateBarcodeGroups(variants);
+  const duplicateBarcodeIndices = new Set(duplicateBarcodeGroups.flatMap(group => group.indices));
+  const catalogBarcodeConflictIndices = new Set(catalogBarcodeConflicts.flatMap(group => group.current.map(item => item.index)));
+  const duplicateBarcodeByIndex = new Map<number, { barcode: string; names: string[] }>();
+  duplicateBarcodeGroups.forEach(group => {
+    group.indices.forEach(index => duplicateBarcodeByIndex.set(index, { barcode: group.barcode, names: group.names }));
+  });
+  const catalogConflictByIndex = new Map<number, CatalogBarcodeConflictGroup>();
+  catalogBarcodeConflicts.forEach(group => {
+    group.current.forEach(item => catalogConflictByIndex.set(item.index, group));
+  });
 
   function generateBarcodeValue(): string {
     // 12 random data digits + the EAN-13 check digit, so the stored value
@@ -95,6 +146,39 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
       candidate = generateBarcodeValue();
     }
     return candidate;
+  }
+  const regenerateVariantBarcode = async (index: number) => {
+    const excludeId = variants[index]?.id;
+    const barcode = await generateUniqueBarcode(excludeId);
+    setVariants(prev => prev.map((variant, i) => i === index ? { ...variant, barcode, _expanded: true } : variant));
+    setCatalogBarcodeConflicts(prev => prev
+      .map(group => ({ ...group, current: group.current.filter(item => item.index !== index) }))
+      .filter(group => group.current.length > 0));
+  };
+
+  async function findCatalogBarcodeConflicts(): Promise<CatalogBarcodeConflictGroup[]> {
+    const checks = variants
+      .map(variant => ({
+        barcode: variant.barcode?.trim() ?? '',
+        excludeVariantId: variant.id ?? null,
+      }))
+      .filter(check => check.barcode);
+    if (checks.length === 0) return [];
+
+    const conflicts = await invoke<BarcodeConflictVariant[]>('find_barcode_conflicts', { checks });
+    const byBarcode = new Map<string, BarcodeConflictVariant[]>();
+    conflicts.forEach(conflict => {
+      byBarcode.set(conflict.barcode, [...(byBarcode.get(conflict.barcode) ?? []), conflict]);
+    });
+
+    return Array.from(byBarcode.entries()).map(([barcode, existing]) => ({
+      barcode,
+      existing,
+      current: variants
+        .map((variant, index) => ({ variant, index }))
+        .filter(({ variant }) => variant.barcode?.trim() === barcode)
+        .map(({ variant, index }) => ({ index, name: variantDisplayName(variant, index) })),
+    })).filter(group => group.current.length > 0 && group.existing.length > 0);
   }
   function generateSkuValue(name: string): string {
     const words = name.trim().split(/\s+/).filter(Boolean);
@@ -180,6 +264,31 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
       toast.error(t('addProduct.variantRequired'));
       return;
     }
+    const duplicateGroups = getDuplicateBarcodeGroups(variants);
+    if (duplicateGroups.length > 0) {
+      const duplicateIndices = new Set(duplicateGroups.flatMap(group => group.indices));
+      setVariants(prev => prev.map((variant, index) => ({
+        ...variant,
+        _expanded: duplicateIndices.has(index) ? true : variant._expanded,
+      })));
+      const details = duplicateGroups
+        .map(group => `${group.barcode}: ${group.names.join(', ')}`)
+        .join(' · ');
+      toast.error(`Duplicate barcode found: ${details}`);
+      return;
+    }
+    const catalogConflicts = await findCatalogBarcodeConflicts();
+    if (catalogConflicts.length > 0) {
+      const conflictIndices = new Set(catalogConflicts.flatMap(group => group.current.map(item => item.index)));
+      setVariants(prev => prev.map((variant, index) => ({
+        ...variant,
+        _expanded: conflictIndices.has(index) ? true : variant._expanded,
+      })));
+      setCatalogBarcodeConflicts(catalogConflicts);
+      toast.error('Barcode already used by another product');
+      return;
+    }
+    setCatalogBarcodeConflicts([]);
     const payload = {
       name: form.name,
       category_id: form.category_id,
@@ -374,6 +483,19 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
             <h3 className="text-[15px] font-bold text-text-primary">{t('addProduct.productVariants')}</h3>
           </div>
           <p className="text-[11.5px] text-text-muted mb-4">{t('addProduct.variantsDesc')}</p>
+          {duplicateBarcodeGroups.length > 0 && (
+            <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+              <p className="text-[12px] font-semibold text-accent-red">Duplicate barcode detected</p>
+              <div className="mt-1.5 space-y-1">
+                {duplicateBarcodeGroups.map(group => (
+                  <p key={group.barcode} className="text-[11.5px] text-accent-red/90">
+                    <span className="font-mono font-semibold">{group.barcode}</span>
+                    {' '}is used by {group.names.join(' and ')}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="space-y-3">
             {variants.map((v, i) => (
@@ -382,7 +504,10 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
                 index={i}
                 variant={v}
                 canRemove={variants.length > 1}
-                onChange={(patch) => setVariants(prev => prev.map((vv, j) => j === i ? { ...vv, ...patch } : vv))}
+                onChange={(patch) => {
+                  if ('barcode' in patch) setCatalogBarcodeConflicts([]);
+                  setVariants(prev => prev.map((vv, j) => j === i ? { ...vv, ...patch } : vv));
+                }}
                 onToggle={() => setVariants(prev => prev.map((vv, j) => j === i ? { ...vv, _expanded: !vv._expanded } : vv))}
                 onRemove={() => removeVariant(i)}
                 onImageSelect={() => handleVariantImageSelect(i)}
@@ -393,8 +518,15 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
                   const id = v.id;
                   generateUniqueBarcode(id).then(bc => {
                     setVariants(prev => prev.map((vv, j) => j === i ? { ...vv, barcode: bc } : vv));
+                    setCatalogBarcodeConflicts([]);
                   });
                 }}
+                duplicateBarcode={duplicateBarcodeIndices.has(i) || catalogBarcodeConflictIndices.has(i)}
+                duplicateBarcodeMessage={duplicateBarcodeByIndex.get(i)?.names
+                  .filter(name => name !== variantDisplayName(v, i))
+                  .join(' and ') || catalogConflictByIndex.get(i)?.existing
+                    .map(existing => `${existing.product_name} / ${existing.variant_name}`)
+                    .join(' and ')}
               />
             ))}
             <button onClick={addVariant}
@@ -477,6 +609,14 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
           onClose={() => { setShowBarcodeModal(false); onBack(); }}
         />
       )}
+
+      {catalogBarcodeConflicts.length > 0 && (
+        <BarcodeConflictModal
+          groups={catalogBarcodeConflicts}
+          onClose={() => setCatalogBarcodeConflicts([])}
+          onRegenerate={regenerateVariantBarcode}
+        />
+      )}
     </div>
   );
 }
@@ -510,10 +650,13 @@ interface VariantCardProps {
   onImageSelect: () => void;
   onGenSku: () => void;
   onGenBarcode: () => void;
+  duplicateBarcode?: boolean;
+  duplicateBarcodeMessage?: string;
 }
 
 function VariantCard({
   index, variant, canRemove, onChange, onToggle, onRemove, onImageSelect, onGenSku, onGenBarcode,
+  duplicateBarcode, duplicateBarcodeMessage,
 }: VariantCardProps) {
   const { t } = useI18n();
   const barcodeSvgRef = useRef<SVGSVGElement>(null);
@@ -534,10 +677,10 @@ function VariantCard({
   const profitPct = variant.selling_price > 0 ? ((profit / variant.selling_price) * 100).toFixed(0) : '0';
 
   return (
-    <div className="rounded-xl border border-border overflow-hidden">
+    <div className={`rounded-xl border overflow-hidden ${duplicateBarcode ? 'border-accent-red ring-2 ring-red-500/10' : 'border-border'}`}>
       <button
         onClick={onToggle}
-        className="w-full flex items-center gap-2 px-3.5 py-2.5 bg-surface hover:bg-card transition-colors text-left"
+        className={`w-full flex items-center gap-2 px-3.5 py-2.5 hover:bg-card transition-colors text-left ${duplicateBarcode ? 'bg-red-50' : 'bg-surface'}`}
       >
         {variant.image_path ? (
           <img src={convertFileSrc(variant.image_path)} alt="" className="w-7 h-7 rounded object-cover border border-border flex-shrink-0" />
@@ -582,12 +725,18 @@ function VariantCard({
           <Field label={t('addProduct.variantBarcode')}>
             <div className="flex items-center gap-2">
               <input value={variant.barcode ?? ''} onChange={(e) => onChange({ barcode: e.target.value || undefined })}
-                placeholder="EAN-13" className="form-input !py-1.5 !text-[12px] font-mono flex-1" />
+                placeholder="EAN-13"
+                className={`form-input !py-1.5 !text-[12px] font-mono flex-1 ${duplicateBarcode ? '!border-accent-red !bg-red-50 focus:!ring-red-500/15 focus:!border-accent-red' : ''}`} />
               <button type="button" onClick={onGenBarcode}
                 className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-border text-[11px] font-medium text-text-secondary hover:bg-surface transition-colors flex-shrink-0">
                 <RefreshCw size={12} /> {t('barcode.generate')}
               </button>
             </div>
+            {duplicateBarcode && (
+              <p className="mt-1.5 text-[11px] font-medium text-accent-red">
+                Same barcode as {duplicateBarcodeMessage}
+              </p>
+            )}
             {variant.barcode && (
               <div className="mt-2 flex justify-center p-2 rounded-lg bg-surface border border-border">
                 <svg ref={barcodeSvgRef} className="h-9" />
@@ -642,6 +791,89 @@ function VariantCard({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function BarcodeConflictModal({
+  groups,
+  onClose,
+  onRegenerate,
+}: {
+  groups: CatalogBarcodeConflictGroup[];
+  onClose: () => void;
+  onRegenerate: (index: number) => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[220] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" />
+      <div
+        className="relative w-full max-w-3xl max-h-[86vh] overflow-hidden rounded-2xl bg-card shadow-2xl"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+          <div>
+            <h3 className="text-[16px] font-bold text-text-primary">Barcode conflict</h3>
+            <p className="text-[12px] text-text-secondary mt-0.5">
+              These barcodes are already used by another product. Regenerate one side before saving.
+            </p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-surface transition-colors">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4 overflow-y-auto max-h-[calc(86vh-76px)]">
+          {groups.map(group => (
+            <div key={group.barcode} className="rounded-xl border border-red-200 bg-red-50/60 overflow-hidden">
+              <div className="px-4 py-3 border-b border-red-200/80">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-accent-red">Duplicate barcode</p>
+                <p className="mt-0.5 font-mono text-[14px] font-bold text-text-primary">{group.barcode}</p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-0">
+                <div className="p-4 border-b md:border-b-0 md:border-r border-red-200/80">
+                  <h4 className="text-[12px] font-semibold text-text-primary mb-2">Current form</h4>
+                  <div className="space-y-2">
+                    {group.current.map(current => (
+                      <div key={current.index} className="rounded-lg border border-border bg-card px-3 py-2">
+                        <p className="text-[13px] font-medium text-text-primary">{current.name}</p>
+                        <p className="text-[11px] text-text-muted mt-0.5">Variant #{current.index + 1}</p>
+                        <button
+                          type="button"
+                          onClick={() => onRegenerate(current.index)}
+                          className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11.5px] font-medium text-text-secondary hover:bg-surface transition-colors"
+                        >
+                          <RefreshCw size={12} />
+                          Regenerate barcode
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="p-4">
+                  <h4 className="text-[12px] font-semibold text-text-primary mb-2">Already in catalog</h4>
+                  <div className="space-y-2">
+                    {group.existing.map(existing => (
+                      <div key={existing.variant_id} className="rounded-lg border border-border bg-card px-3 py-2">
+                        <p className="text-[13px] font-medium text-text-primary">{existing.product_name}</p>
+                        <p className="text-[11.5px] text-text-secondary mt-0.5">
+                          {existing.variant_name} · {existing.category_name ?? 'Uncategorized'}
+                        </p>
+                        <p className="text-[11px] text-text-muted mt-0.5">
+                          {existing.quantity} stock · {existing.selling_price.toFixed(2)} DA
+                          {existing.sku ? ` · ${existing.sku}` : ''}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

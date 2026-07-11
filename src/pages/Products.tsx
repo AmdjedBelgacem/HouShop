@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
@@ -9,8 +9,23 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import { useI18n } from '../i18n';
 import {
   Search, Plus, Edit3, Trash2, PackagePlus, X,
-  ArrowUpDown, ScanBarcode, Layers, ChevronDown, ChevronUp,
+  ArrowUpDown, ScanBarcode, Layers, ChevronDown, ChevronUp, MoveRight,
 } from 'lucide-react';
+
+const PRODUCT_CATEGORY_FILTER_KEY = 'houshop.products.categoryFilter';
+
+type ProductSortField = 'name' | 'category_name' | 'quantity' | 'cost_price' | 'selling_price';
+
+function loadSavedCategoryFilter(): number | null {
+  try {
+    const raw = localStorage.getItem(PRODUCT_CATEGORY_FILTER_KEY);
+    if (!raw) return null;
+    const id = Number(raw);
+    return Number.isFinite(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
 
 interface ProductsProps {
   onAddProduct: () => void;
@@ -21,10 +36,10 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
   const queryClient = useQueryClient();
   const { t } = useI18n();
   const [search, setSearch] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState<number | null>(null);
+  const [categoryFilter, setCategoryFilter] = useState<number | null>(loadSavedCategoryFilter);
   const [showStock, setShowStock] = useState(false);
   const [stockProduct, setStockProduct] = useState<Product | null>(null);
-  const [sortField, setSortField] = useState<'name' | 'quantity' | 'cost_price' | 'selling_price'>('name');
+  const [sortField, setSortField] = useState<ProductSortField>('name');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
   const [barcodeProduct, setBarcodeProduct] = useState<Product | null>(null);
   // When printing from an expanded variant row, preselect that variant.
@@ -34,6 +49,12 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
   const [expandedProductId, setExpandedProductId] = useState<number | null>(null);
   // Variant targeted for deletion (from an expanded row).
   const [deleteVariantTarget, setDeleteVariantTarget] = useState<ProductVariant | null>(null);
+  const [moveProduct, setMoveProduct] = useState<Product | null>(null);
+  const [moveVariants, setMoveVariants] = useState<ProductVariant[]>([]);
+  const [selectedMoveVariantIds, setSelectedMoveVariantIds] = useState<number[]>([]);
+  const [moveTargetProductId, setMoveTargetProductId] = useState<number | null>(null);
+  const [moveSearch, setMoveSearch] = useState('');
+  const [loadingMoveVariants, setLoadingMoveVariants] = useState(false);
 
   const { data: products, isLoading } = useQuery({
     queryKey: ['products', search],
@@ -45,6 +66,20 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
     queryKey: ['categories'],
     queryFn: () => invoke<Category[]>('get_categories'),
   });
+
+  useEffect(() => {
+    try {
+      if (categoryFilter == null) localStorage.removeItem(PRODUCT_CATEGORY_FILTER_KEY);
+      else localStorage.setItem(PRODUCT_CATEGORY_FILTER_KEY, String(categoryFilter));
+    } catch {
+      // Non-critical: filtering still works even if storage is unavailable.
+    }
+  }, [categoryFilter]);
+
+  useEffect(() => {
+    if (categoryFilter == null || !categories) return;
+    if (!categories.some(c => c.id === categoryFilter)) setCategoryFilter(null);
+  }, [categories, categoryFilter]);
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => invoke('delete_product', { id }),
@@ -78,11 +113,47 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
     onError: () => toast.error(t('toast.error')),
   });
 
+  const moveVariantsMutation = useMutation({
+    mutationFn: (data: { variantIds: number[]; targetProductId: number }) =>
+      invoke('move_variants_to_product', data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['product-variants'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['low-stock'] });
+      setMoveProduct(null);
+      setMoveVariants([]);
+      setSelectedMoveVariantIds([]);
+      setMoveTargetProductId(null);
+      setMoveSearch('');
+      toast.success('Variants moved');
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e || t('toast.error'))),
+  });
+
   // Open the barcode modal scoped to a specific variant. Passing the variant
   // name makes the modal default-select that variant's label.
   const printVariantBarcode = (p: Product, v: ProductVariant) => {
     setBarcodeProduct(p);
     setBarcodeVariantName(v.variant_name);
+  };
+
+  const openMoveVariants = async (p: Product) => {
+    setMoveProduct(p);
+    setMoveVariants([]);
+    setSelectedMoveVariantIds([]);
+    setMoveTargetProductId(null);
+    setMoveSearch('');
+    setLoadingMoveVariants(true);
+    try {
+      const vs = await invoke<ProductVariant[]>('get_product_variants', { productId: p.id });
+      setMoveVariants(vs);
+    } catch {
+      toast.error(t('toast.error'));
+      setMoveProduct(null);
+    } finally {
+      setLoadingMoveVariants(false);
+    }
   };
 
   const [stockForm, setStockForm] = useState({ quantity: '', unit_cost: '', notes: '' });
@@ -130,17 +201,47 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
       .catch(() => toast.error(t('toast.error')));
   };
 
-  const toggleSort = (field: typeof sortField) => {
+  const toggleSort = (field: ProductSortField) => {
     if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortField(field); setSortDir('asc'); }
   };
-  const filteredProducts = (products ?? [])
+
+  const filteredProducts = [...(products ?? [])]
     .filter(p => categoryFilter === null || p.category_id === categoryFilter)
     .sort((a, b) => {
       const mul = sortDir === 'asc' ? 1 : -1;
       if (sortField === 'name') return a.name.localeCompare(b.name) * mul;
+      if (sortField === 'category_name') {
+        const ac = a.category_name ?? '';
+        const bc = b.category_name ?? '';
+        return (ac.localeCompare(bc) || a.name.localeCompare(b.name)) * mul;
+      }
       return ((a[sortField] as number) - (b[sortField] as number)) * mul;
     });
+  const moveTargetOptions = (products ?? [])
+    .filter(p => p.id !== moveProduct?.id)
+    .filter(p => {
+      const q = moveSearch.trim().toLowerCase();
+      if (!q) return true;
+      return [
+        p.name,
+        p.category_name ?? '',
+        p.sku ?? '',
+        p.barcode ?? '',
+        p.description ?? '',
+      ].some(value => value.toLowerCase().includes(q));
+    })
+    .sort((a, b) =>
+      (a.category_name ?? '').localeCompare(b.category_name ?? '') ||
+      a.name.localeCompare(b.name)
+    );
+  const selectedMoveVariants = moveVariants.filter(v => selectedMoveVariantIds.includes(v.id));
+  const canMoveSelected =
+    !!moveProduct &&
+    !!moveTargetProductId &&
+    selectedMoveVariantIds.length > 0 &&
+    selectedMoveVariantIds.length < moveVariants.length &&
+    !moveVariantsMutation.isPending;
 
   return (
     <div className="p-8">
@@ -195,7 +296,9 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
                 <th className="text-left py-3 px-5 text-text-muted font-semibold text-[11px] uppercase tracking-wider cursor-pointer select-none" onClick={() => toggleSort('name')}>
                   <span className="flex items-center gap-1.5">Product <ArrowUpDown size={11} /></span>
                 </th>
-                <th className="text-left py-3 px-4 text-text-muted font-semibold text-[11px] uppercase tracking-wider">Category</th>
+                <th className="text-left py-3 px-4 text-text-muted font-semibold text-[11px] uppercase tracking-wider cursor-pointer select-none" onClick={() => toggleSort('category_name')}>
+                  <span className="flex items-center gap-1.5">Category <ArrowUpDown size={11} /></span>
+                </th>
                 <th className="text-left py-3 px-4 text-text-muted font-semibold text-[11px] uppercase tracking-wider">Variants</th>
                 <th className="text-right py-3 px-4 text-text-muted font-semibold text-[11px] uppercase tracking-wider cursor-pointer select-none" onClick={() => toggleSort('quantity')}>
                   <span className="flex items-center justify-end gap-1.5">Stock <ArrowUpDown size={11} /></span>
@@ -271,6 +374,10 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
                             className="p-1.5 rounded-md text-accent-blue hover:bg-blue-50 transition-colors" title="Edit">
                             <Edit3 size={15} />
                           </button>
+                          <button onClick={() => openMoveVariants(p)}
+                            className="p-1.5 rounded-md text-text-muted hover:bg-surface transition-colors" title="Move variants">
+                            <MoveRight size={15} />
+                          </button>
                           <button onClick={() => setDeleteTarget(p)}
                             className="p-1.5 rounded-md text-accent-red hover:bg-red-50 transition-colors" title="Delete">
                             <Trash2 size={15} />
@@ -334,6 +441,13 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
                                             title={expandedVariants.length <= 1 ? "Can't delete the last variant" : 'Delete variant'}
                                           >
                                             <Trash2 size={14} />
+                                          </button>
+                                          <button
+                                            onClick={() => openMoveVariants(p)}
+                                            className="p-1.5 rounded-md text-text-muted hover:bg-surface transition-colors"
+                                            title="Move variants"
+                                          >
+                                            <MoveRight size={14} />
                                           </button>
                                         </div>
                                       </td>
@@ -404,6 +518,144 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
                 </button>
               </div>
             </form>
+          </div>
+        </ModalOverlay>
+      )}
+
+      {moveProduct && (
+        <ModalOverlay onClose={() => !moveVariantsMutation.isPending && setMoveProduct(null)}>
+          <div className="bg-card rounded-2xl w-full max-w-2xl shadow-xl overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+              <div>
+                <h3 className="text-[16px] font-bold text-text-primary">Move variants</h3>
+                <p className="text-[12px] text-text-secondary mt-0.5">
+                  From {moveProduct.name} · {moveProduct.category_name ?? 'Uncategorized'}
+                </p>
+              </div>
+              <button
+                onClick={() => setMoveProduct(null)}
+                disabled={moveVariantsMutation.isPending}
+                className="p-1 rounded-lg hover:bg-surface transition-colors disabled:opacity-50"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div>
+                <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-text-muted mb-2">Select variants</h4>
+                <div className="rounded-xl border border-border overflow-hidden max-h-[300px] overflow-y-auto">
+                  {loadingMoveVariants ? (
+                    <p className="px-4 py-8 text-center text-[12px] text-text-muted">Loading variants…</p>
+                  ) : moveVariants.length === 0 ? (
+                    <p className="px-4 py-8 text-center text-[12px] text-text-muted">No variants found.</p>
+                  ) : (
+                    moveVariants.map(v => {
+                      const checked = selectedMoveVariantIds.includes(v.id);
+                      const disabled = moveVariants.length <= 1;
+                      return (
+                        <label
+                          key={v.id}
+                          className={`flex items-start gap-3 px-4 py-3 border-b border-border-light last:border-0 ${disabled ? 'opacity-50' : 'cursor-pointer hover:bg-surface/60'}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={disabled}
+                            onChange={e => {
+                              setSelectedMoveVariantIds(ids =>
+                                e.target.checked
+                                  ? [...ids, v.id]
+                                  : ids.filter(id => id !== v.id)
+                              );
+                            }}
+                            className="mt-1 accent-navy"
+                          />
+                          <span className="min-w-0">
+                            <span className="block text-[13px] font-medium text-text-primary">{v.variant_name}</span>
+                            <span className="block text-[11.5px] text-text-secondary mt-0.5">
+                              {v.quantity} stock · {v.selling_price.toFixed(2)} DA
+                              {v.barcode ? ` · ${v.barcode}` : ''}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+                {moveVariants.length <= 1 && !loadingMoveVariants && (
+                  <p className="text-[11.5px] text-text-muted mt-2">
+                    A product must keep at least one variant. Edit the product category if the whole product is misplaced.
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-text-muted mb-2">Destination product</h4>
+                <div className="relative mb-2">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+                  <input
+                    value={moveSearch}
+                    onChange={e => setMoveSearch(e.target.value)}
+                    placeholder="Search product, category, SKU, barcode..."
+                    className="w-full pl-8 pr-3 py-2 rounded-lg border border-border text-[12.5px] bg-surface focus:outline-none focus:ring-2 focus:ring-navy/15 focus:border-navy/30"
+                  />
+                </div>
+                <div className="rounded-xl border border-border overflow-hidden max-h-[255px] overflow-y-auto">
+                  {moveTargetOptions.length === 0 ? (
+                    <p className="px-4 py-8 text-center text-[12px] text-text-muted">No destination products found.</p>
+                  ) : (
+                    moveTargetOptions.map(p => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => setMoveTargetProductId(p.id)}
+                        className={`w-full text-left px-4 py-3 border-b border-border-light last:border-0 transition-colors ${
+                          moveTargetProductId === p.id
+                            ? 'bg-navy/[0.08] text-text-primary'
+                            : 'hover:bg-surface/60 text-text-secondary'
+                        }`}
+                      >
+                        <span className="block text-[13px] font-medium text-text-primary">{p.name}</span>
+                        <span className="block text-[11.5px] text-text-muted mt-0.5">
+                          {p.category_name ?? 'Uncategorized'} · {p.variant_count} variants
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="px-6 py-4 border-t border-border bg-surface/40 flex items-center justify-between gap-4">
+              <p className="text-[12px] text-text-secondary">
+                {selectedMoveVariants.length > 0
+                  ? `${selectedMoveVariants.length} variant${selectedMoveVariants.length === 1 ? '' : 's'} selected`
+                  : 'Select at least one variant'}
+              </p>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setMoveProduct(null)}
+                  disabled={moveVariantsMutation.isPending}
+                  className="px-4 py-2 rounded-lg border border-border text-[13px] font-medium text-text-secondary hover:bg-card transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={!canMoveSelected}
+                  onClick={() => moveTargetProductId && moveVariantsMutation.mutate({
+                    variantIds: selectedMoveVariantIds,
+                    targetProductId: moveTargetProductId,
+                  })}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-navy text-white text-[13px] font-medium hover:bg-navy-light disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  <MoveRight size={14} />
+                  {moveVariantsMutation.isPending ? 'Moving…' : 'Move variants'}
+                </button>
+              </div>
+            </div>
           </div>
         </ModalOverlay>
       )}

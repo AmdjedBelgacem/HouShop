@@ -1,8 +1,8 @@
 use sqlx::{SqlitePool, Transaction};
 use tauri::State;
 use crate::models::{
-    BarcodeLookup, Category, CreateCategory, CreateProduct, Product, ProductVariant,
-    ProductWithCategory, UpdateProduct, VariantInput,
+    BarcodeConflictCheck, BarcodeConflictVariant, BarcodeLookup, Category, CreateCategory,
+    CreateProduct, Product, ProductVariant, ProductWithCategory, UpdateProduct, VariantInput,
 };
 
 // Variants are the single source of truth for stock/price/barcode/SKU. These
@@ -115,13 +115,125 @@ pub async fn get_product_by_barcode(
 }
 
 #[tauri::command]
+pub async fn find_barcode_conflicts(
+    pool: State<'_, SqlitePool>,
+    checks: Vec<BarcodeConflictCheck>,
+) -> Result<Vec<BarcodeConflictVariant>, String> {
+    let mut conflicts = Vec::new();
+    for check in checks {
+        let barcode = check.barcode.trim();
+        if barcode.is_empty() {
+            continue;
+        }
+
+        let mut rows = match check.exclude_variant_id {
+            Some(exclude_id) => sqlx::query_as::<_, BarcodeConflictVariant>(
+                r#"
+                SELECT pv.barcode AS barcode,
+                       pv.id AS variant_id,
+                       pv.variant_name AS variant_name,
+                       p.id AS product_id,
+                       p.name AS product_name,
+                       c.name AS category_name,
+                       pv.sku AS sku,
+                       pv.quantity AS quantity,
+                       pv.selling_price AS selling_price
+                FROM product_variants pv
+                JOIN products p ON pv.product_id = p.id
+                LEFT JOIN categories c ON p.category_id = c.id
+                WHERE pv.barcode = ? AND pv.id != ?
+                ORDER BY p.name, pv.variant_name
+                "#,
+            )
+            .bind(barcode)
+            .bind(exclude_id)
+            .fetch_all(pool.inner())
+            .await
+            .map_err(|e| format!("Failed to find barcode conflicts: {}", e))?,
+            None => sqlx::query_as::<_, BarcodeConflictVariant>(
+                r#"
+                SELECT pv.barcode AS barcode,
+                       pv.id AS variant_id,
+                       pv.variant_name AS variant_name,
+                       p.id AS product_id,
+                       p.name AS product_name,
+                       c.name AS category_name,
+                       pv.sku AS sku,
+                       pv.quantity AS quantity,
+                       pv.selling_price AS selling_price
+                FROM product_variants pv
+                JOIN products p ON pv.product_id = p.id
+                LEFT JOIN categories c ON p.category_id = c.id
+                WHERE pv.barcode = ?
+                ORDER BY p.name, pv.variant_name
+                "#,
+            )
+            .bind(barcode)
+            .fetch_all(pool.inner())
+            .await
+            .map_err(|e| format!("Failed to find barcode conflicts: {}", e))?,
+        };
+        conflicts.append(&mut rows);
+    }
+    Ok(conflicts)
+}
+
+#[tauri::command]
 pub async fn search_products(
     pool: State<'_, SqlitePool>,
     query: String,
 ) -> Result<Vec<ProductWithCategory>, String> {
-    let search = format!("%{}%", query);
-    let sql = format!("{} WHERE p.name LIKE ? ORDER BY p.name LIMIT 20", PRODUCT_AGGREGATE_SELECT);
+    let q = query.trim();
+    if q.is_empty() {
+        return get_products(pool).await;
+    }
+
+    let search = format!("%{}%", q);
+    let sql = format!(
+        r#"
+        {}
+        WHERE p.name LIKE ?
+           OR p.description LIKE ?
+           OR p.sku LIKE ?
+           OR c.name LIKE ?
+           OR s.barcode LIKE ?
+           OR CAST(COALESCE(s.qty, 0) AS TEXT) LIKE ?
+           OR CAST(COALESCE(s.cost, 0) AS TEXT) LIKE ?
+           OR CAST(COALESCE(s.price, 0) AS TEXT) LIKE ?
+           OR EXISTS (
+                SELECT 1
+                FROM product_variants pv
+                WHERE pv.product_id = p.id
+                  AND (
+                    pv.variant_name LIKE ?
+                    OR pv.condition_note LIKE ?
+                    OR pv.barcode LIKE ?
+                    OR pv.sku LIKE ?
+                    OR CAST(pv.quantity AS TEXT) LIKE ?
+                    OR CAST(pv.cost_price AS TEXT) LIKE ?
+                    OR CAST(pv.selling_price AS TEXT) LIKE ?
+                  )
+           )
+        ORDER BY p.name
+        LIMIT 100
+        "#,
+        PRODUCT_AGGREGATE_SELECT
+    );
     sqlx::query_as(&sql)
+        .bind(&search)
+        .bind(&search)
+        .bind(&search)
+        .bind(&search)
+        .bind(&search)
+        .bind(&search)
+        .bind(&search)
+        .bind(&search)
+        .bind(&search)
+        .bind(&search)
+        .bind(&search)
+        .bind(&search)
+        .bind(&search)
+        .bind(&search)
         .bind(&search)
         .fetch_all(pool.inner())
         .await
@@ -375,6 +487,110 @@ pub async fn delete_variant(
         .execute(pool.inner())
         .await
         .map_err(|e| format!("Failed to delete variant: {}", e))?;
+    Ok(())
+}
+
+/// Move selected variants to another product. This is for correcting catalog
+/// mistakes where variants were added under the wrong product/category. The
+/// variant rows keep their stock, barcode, SKU, prices, and ids; only their
+/// parent product changes. Related rows that also carry `variant_id` are updated
+/// so future lookups don't show mismatched product/variant pairs.
+#[tauri::command]
+pub async fn move_variants_to_product(
+    pool: State<'_, SqlitePool>,
+    variant_ids: Vec<i64>,
+    target_product_id: i64,
+) -> Result<(), String> {
+    if variant_ids.is_empty() {
+        return Err("Select at least one variant to move".to_string());
+    }
+
+    let target_exists: Option<(i64,)> = sqlx::query_as("SELECT id FROM products WHERE id = ?")
+        .bind(target_product_id)
+        .fetch_optional(pool.inner())
+        .await
+        .map_err(|e| format!("Failed to check target product: {}", e))?;
+    if target_exists.is_none() {
+        return Err("Target product not found".to_string());
+    }
+
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| format!("Failed to start variant move: {}", e))?;
+
+    for variant_id in variant_ids {
+        let parent: Option<(i64,)> = sqlx::query_as(
+            "SELECT product_id FROM product_variants WHERE id = ?",
+        )
+        .bind(variant_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| format!("Failed to find variant: {}", e))?;
+
+        let source_product_id = match parent {
+            Some((pid,)) => pid,
+            None => return Err(format!("Variant {} not found", variant_id)),
+        };
+
+        if source_product_id == target_product_id {
+            continue;
+        }
+
+        let remaining: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM product_variants WHERE product_id = ? AND id != ?",
+        )
+        .bind(source_product_id)
+        .bind(variant_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| format!("Failed to count source variants: {}", e))?;
+
+        if remaining.0 <= 0 {
+            return Err("Cannot move the last variant out of a product".to_string());
+        }
+
+        sqlx::query(
+            "UPDATE product_variants SET product_id = ?, updated_at = datetime('now') WHERE id = ?",
+        )
+        .bind(target_product_id)
+        .bind(variant_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| format!("Failed to move variant: {}", e))?;
+
+        sqlx::query("UPDATE inventory_transactions SET product_id = ? WHERE variant_id = ?")
+            .bind(target_product_id)
+            .bind(variant_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("Failed to update inventory history: {}", e))?;
+
+        sqlx::query("UPDATE sale_items SET product_id = ? WHERE variant_id = ?")
+            .bind(target_product_id)
+            .bind(variant_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("Failed to update sales history: {}", e))?;
+
+        sqlx::query("UPDATE reservations SET product_id = ? WHERE variant_id = ?")
+            .bind(target_product_id)
+            .bind(variant_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("Failed to update reservations: {}", e))?;
+
+        sqlx::query("UPDATE returns SET product_id = ? WHERE variant_id = ?")
+            .bind(target_product_id)
+            .bind(variant_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| format!("Failed to update returns: {}", e))?;
+    }
+
+    tx.commit()
+        .await
+        .map_err(|e| format!("Failed to commit variant move: {}", e))?;
     Ok(())
 }
 
