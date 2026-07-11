@@ -238,6 +238,43 @@ export interface DailyReport {
   total_transactions: number;
   items_sold: number;
 }
+export interface InventoryValuationVariant {
+  id: number;
+  variant_name: string;
+  quantity: number;
+  unit_cost: number;
+  unit_price: number;
+  total_cost: number;
+  projected_revenue: number;
+  projected_profit: number;
+}
+export interface InventoryValuationProduct {
+  id: number;
+  name: string;
+  category_id: number | null;
+  category_name: string | null;
+  quantity: number;
+  total_cost: number;
+  projected_revenue: number;
+  projected_profit: number;
+  variants: InventoryValuationVariant[];
+}
+export interface InventoryValuationCategory {
+  id: number | null;
+  name: string;
+  quantity: number;
+  total_cost: number;
+  projected_revenue: number;
+  projected_profit: number;
+  products: InventoryValuationProduct[];
+}
+export interface InventoryValuationSummary {
+  quantity: number;
+  total_cost: number;
+  projected_revenue: number;
+  projected_profit: number;
+  categories: InventoryValuationCategory[];
+}
 export interface CartDisplayItem {
   product: Product;
   quantity: number;

@@ -5,9 +5,9 @@ import logoImg from '../assets/logo.png';
 import UpdateBanner from './UpdateBanner';
 import {
   LayoutGrid, ClipboardList, Clock, Users, ShoppingCart, Plus,
-  HelpCircle, LogOut, CalendarCheck, RotateCcw,
+  HelpCircle, LogOut, CalendarCheck, RotateCcw, Calculator,
 } from 'lucide-react';
-type Page = 'dashboard' | 'products' | 'add-product' | 'edit-product' | 'history' | 'customers' | 'add-customer' | 'edit-customer' | 'reservations' | 'returns' | 'pos' | 'profile' | 'logs';
+type Page = 'dashboard' | 'products' | 'product-evaluation' | 'add-product' | 'edit-product' | 'history' | 'customers' | 'add-customer' | 'edit-customer' | 'reservations' | 'returns' | 'pos' | 'profile' | 'logs';
 interface LayoutProps {
   children: ReactNode;
   currentPage: Page;
@@ -16,6 +16,7 @@ interface LayoutProps {
 const navItemKeys: { id: Page; key: string; icon: ReactNode }[] = [
   { id: 'dashboard', key: 'sidebar.dashboard', icon: <LayoutGrid size={18} strokeWidth={1.8} /> },
   { id: 'products', key: 'sidebar.products', icon: <ClipboardList size={18} strokeWidth={1.8} /> },
+  { id: 'product-evaluation', key: 'sidebar.productEvaluation', icon: <Calculator size={18} strokeWidth={1.8} /> },
   { id: 'history', key: 'sidebar.history', icon: <Clock size={18} strokeWidth={1.8} /> },
   { id: 'customers', key: 'sidebar.customers', icon: <Users size={18} strokeWidth={1.8} /> },
   { id: 'reservations', key: 'sidebar.reservations', icon: <CalendarCheck size={18} strokeWidth={1.8} /> },

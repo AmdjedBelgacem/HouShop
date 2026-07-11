@@ -7,6 +7,7 @@ import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Products from './pages/Products';
+import ProductEvaluation from './pages/ProductEvaluation';
 import AddProduct from './pages/AddProduct';
 import Checkout from './pages/Checkout';
 import Sales from './pages/Sales';
@@ -27,7 +28,7 @@ const queryClient = new QueryClient({
     },
   },
 });
-type Page = 'dashboard' | 'products' | 'add-product' | 'edit-product' | 'history' | 'customers' | 'add-customer' | 'edit-customer' | 'reservations' | 'returns' | 'pos' | 'profile' | 'logs';
+type Page = 'dashboard' | 'products' | 'product-evaluation' | 'add-product' | 'edit-product' | 'history' | 'customers' | 'add-customer' | 'edit-customer' | 'reservations' | 'returns' | 'pos' | 'profile' | 'logs';
 function AppContent() {
   const { isAuthenticated } = useAuth();
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
@@ -51,6 +52,7 @@ function AppContent() {
     switch (currentPage) {
       case 'dashboard': return <Dashboard onNavigate={(p) => setCurrentPage(p as Page)} />;
       case 'products': return <Products onAddProduct={() => { setEditingProduct(null); setCurrentPage('add-product'); }} onEditProduct={(p) => { setEditingProduct(p); setCurrentPage('edit-product'); }} />;
+      case 'product-evaluation': return <ProductEvaluation />;
       case 'add-product': return <AddProduct onBack={() => setCurrentPage('products')} />;
       case 'edit-product': return <AddProduct onBack={() => setCurrentPage('products')} editProduct={editingProduct} />;
       case 'history': return <Sales />;

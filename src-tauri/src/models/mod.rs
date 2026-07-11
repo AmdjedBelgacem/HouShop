@@ -258,6 +258,47 @@ pub struct DailyReport {
     pub total_transactions: i64,
     pub items_sold: i64,
 }
+#[derive(Debug, Clone, Serialize)]
+pub struct InventoryValuationVariant {
+    pub id: i64,
+    pub variant_name: String,
+    pub quantity: i64,
+    pub unit_cost: f64,
+    pub unit_price: f64,
+    pub total_cost: f64,
+    pub projected_revenue: f64,
+    pub projected_profit: f64,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct InventoryValuationProduct {
+    pub id: i64,
+    pub name: String,
+    pub category_id: Option<i64>,
+    pub category_name: Option<String>,
+    pub quantity: i64,
+    pub total_cost: f64,
+    pub projected_revenue: f64,
+    pub projected_profit: f64,
+    pub variants: Vec<InventoryValuationVariant>,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct InventoryValuationCategory {
+    pub id: Option<i64>,
+    pub name: String,
+    pub quantity: i64,
+    pub total_cost: f64,
+    pub projected_revenue: f64,
+    pub projected_profit: f64,
+    pub products: Vec<InventoryValuationProduct>,
+}
+#[derive(Debug, Clone, Serialize)]
+pub struct InventoryValuationSummary {
+    pub quantity: i64,
+    pub total_cost: f64,
+    pub projected_revenue: f64,
+    pub projected_profit: f64,
+    pub categories: Vec<InventoryValuationCategory>,
+}
 #[derive(Debug, Serialize)]
 pub struct DashboardStats {
     pub total_products: i64,

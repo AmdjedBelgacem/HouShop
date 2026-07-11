@@ -245,6 +245,7 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
       queryClient.invalidateQueries({ queryKey: ['products'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
       queryClient.invalidateQueries({ queryKey: ['low-stock'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-valuation'] });
     },
   });
   const updateMutation = useMutation({
@@ -254,6 +255,7 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
       queryClient.invalidateQueries({ queryKey: ['low-stock'] });
       queryClient.invalidateQueries({ queryKey: ['product-variants'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-valuation'] });
     },
   });
 

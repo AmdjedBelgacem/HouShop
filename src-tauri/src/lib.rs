@@ -61,6 +61,7 @@ pub fn run() {
             commands::dashboard::get_dashboard_stats,
             commands::dashboard::get_daily_report,
             commands::dashboard::get_reports_by_range,
+            commands::dashboard::get_inventory_valuation,
             commands::printer::list_printers,
             commands::printer::print_label,
             save_image,

@@ -1,6 +1,10 @@
 use sqlx::SqlitePool;
+use std::collections::BTreeMap;
 use tauri::State;
-use crate::models::{DailyReport, DashboardStats};
+use crate::models::{
+    DailyReport, DashboardStats, InventoryValuationCategory, InventoryValuationProduct,
+    InventoryValuationSummary, InventoryValuationVariant,
+};
 #[tauri::command]
 pub async fn get_dashboard_stats(pool: State<'_, SqlitePool>) -> Result<DashboardStats, String> {
     let total_products: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM products")
@@ -123,4 +127,114 @@ pub async fn get_reports_by_range(
             items_sold: items,
         })
         .collect())
+}
+
+#[tauri::command]
+pub async fn get_inventory_valuation(
+    pool: State<'_, SqlitePool>,
+) -> Result<InventoryValuationSummary, String> {
+    let rows: Vec<(
+        Option<i64>,
+        Option<String>,
+        i64,
+        String,
+        i64,
+        String,
+        i64,
+        f64,
+        f64,
+    )> = sqlx::query_as(
+        r#"
+        SELECT p.category_id,
+               c.name AS category_name,
+               p.id AS product_id,
+               p.name AS product_name,
+               pv.id AS variant_id,
+               pv.variant_name,
+               pv.quantity,
+               pv.cost_price,
+               pv.selling_price
+        FROM product_variants pv
+        JOIN products p ON pv.product_id = p.id
+        LEFT JOIN categories c ON p.category_id = c.id
+        ORDER BY COALESCE(c.name, 'Uncategorized'), p.name, pv.variant_name
+        "#,
+    )
+    .fetch_all(pool.inner())
+    .await
+    .map_err(|e| format!("Failed to calculate inventory valuation: {}", e))?;
+
+    let mut categories: BTreeMap<String, InventoryValuationCategory> = BTreeMap::new();
+    let mut overall = InventoryValuationSummary {
+        quantity: 0,
+        total_cost: 0.0,
+        projected_revenue: 0.0,
+        projected_profit: 0.0,
+        categories: Vec::new(),
+    };
+
+    for (category_id, category_name, product_id, product_name, variant_id, variant_name, quantity, unit_cost, unit_price) in rows {
+        let category_label = category_name.clone().unwrap_or_else(|| "Uncategorized".to_string());
+        let total_cost = quantity as f64 * unit_cost;
+        let projected_revenue = quantity as f64 * unit_price;
+        let projected_profit = projected_revenue - total_cost;
+        let variant = InventoryValuationVariant {
+            id: variant_id,
+            variant_name,
+            quantity,
+            unit_cost,
+            unit_price,
+            total_cost,
+            projected_revenue,
+            projected_profit,
+        };
+
+        let category = categories.entry(category_label.clone()).or_insert_with(|| InventoryValuationCategory {
+            id: category_id,
+            name: category_label,
+            quantity: 0,
+            total_cost: 0.0,
+            projected_revenue: 0.0,
+            projected_profit: 0.0,
+            products: Vec::new(),
+        });
+
+        let product_idx = match category.products.iter().position(|p| p.id == product_id) {
+            Some(idx) => idx,
+            None => {
+                category.products.push(InventoryValuationProduct {
+                    id: product_id,
+                    name: product_name,
+                    category_id,
+                    category_name: category_name.clone(),
+                    quantity: 0,
+                    total_cost: 0.0,
+                    projected_revenue: 0.0,
+                    projected_profit: 0.0,
+                    variants: Vec::new(),
+                });
+                category.products.len() - 1
+            }
+        };
+
+        let product = &mut category.products[product_idx];
+        product.quantity += quantity;
+        product.total_cost += total_cost;
+        product.projected_revenue += projected_revenue;
+        product.projected_profit += projected_profit;
+        product.variants.push(variant);
+
+        category.quantity += quantity;
+        category.total_cost += total_cost;
+        category.projected_revenue += projected_revenue;
+        category.projected_profit += projected_profit;
+
+        overall.quantity += quantity;
+        overall.total_cost += total_cost;
+        overall.projected_revenue += projected_revenue;
+        overall.projected_profit += projected_profit;
+    }
+
+    overall.categories = categories.into_values().collect();
+    Ok(overall)
 }

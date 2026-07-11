@@ -2,7 +2,12 @@ import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
-import type { Product, Category, CreateInventoryTransaction, ProductVariant } from '../lib/types';
+import type {
+  Product,
+  Category,
+  CreateInventoryTransaction,
+  ProductVariant,
+} from '../lib/types';
 import CustomSelect from '../components/CustomSelect';
 import BarcodePrintModal from '../components/BarcodePrintModal';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -86,6 +91,7 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['products'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-valuation'] });
       setDeleteTarget(null);
       toast.success(t('toast.productDeleted'));
     },
@@ -107,6 +113,7 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
       queryClient.invalidateQueries({ queryKey: ['products'] });
       queryClient.invalidateQueries({ queryKey: ['product-variants'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-valuation'] });
       setDeleteVariantTarget(null);
       toast.success('Variant deleted');
     },
@@ -121,6 +128,7 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
       queryClient.invalidateQueries({ queryKey: ['product-variants'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
       queryClient.invalidateQueries({ queryKey: ['low-stock'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-valuation'] });
       setMoveProduct(null);
       setMoveVariants([]);
       setSelectedMoveVariantIds([]);
@@ -194,6 +202,7 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
         queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] });
         queryClient.invalidateQueries({ queryKey: ['low-stock'] });
         queryClient.invalidateQueries({ queryKey: ['product-variants'] });
+        queryClient.invalidateQueries({ queryKey: ['inventory-valuation'] });
         setStockProduct(null);
         setShowStock(false);
         toast.success(t('toast.stockAdded'));
