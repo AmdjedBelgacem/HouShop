@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default capabilities for the app","local":true,"windows":["*"],"permissions":["core:default","core:webview:allow-print","shell:allow-open"]}}
+{"default":{"identifier":"default","description":"Default capabilities for the app","local":true,"windows":["*"],"permissions":["core:default","core:webview:allow-print","core:window:allow-set-icon","shell:allow-open"]}}

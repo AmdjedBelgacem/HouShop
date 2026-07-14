@@ -88,18 +88,57 @@
       }
     </style>
     <script>
-      if (localStorage.getItem('shop_theme') === 'dark') {
-        document.documentElement.classList.add('dark');
-      }
+      // Theme + custom logo must apply BEFORE first paint so the loading
+      // animation and favicon match branding (React is not running yet).
+      (function () {
+        try {
+          if (localStorage.getItem('shop_theme') === 'dark') {
+            document.documentElement.classList.add('dark');
+          }
+        } catch (e) { /* ignore */ }
+        try {
+          var customLogo = localStorage.getItem('shop_logo_data_url');
+          if (customLogo && customLogo.indexOf('data:image/') === 0) {
+            window.__SHOP_CUSTOM_LOGO__ = customLogo;
+          }
+        } catch (e) { /* ignore */ }
+        try {
+          var customName = localStorage.getItem('shop_name');
+          if (customName && customName.trim()) {
+            window.__SHOP_CUSTOM_NAME__ = customName.trim();
+          }
+        } catch (e) { /* ignore */ }
+      })();
     </script>
   </head>
   <body>
     <div id="splash">
-      <img src="/logo.png" alt="HouPhone Shop" />
-      <div class="brand">HouPhone Shop</div>
+      <img id="splash-logo" src="/logo.png" alt="HouPhone Shop" />
+      <div class="brand" id="splash-brand">HouPhone Shop</div>
       <div class="subtitle">MANAGEMENT SUITE</div>
       <div class="loader"></div>
     </div>
+    <script>
+      // Swap splash + tab icon to the cached custom logo as soon as the body exists.
+      (function () {
+        var logo = window.__SHOP_CUSTOM_LOGO__;
+        var name = window.__SHOP_CUSTOM_NAME__;
+        if (logo) {
+          var img = document.getElementById('splash-logo');
+          if (img) img.src = logo;
+          var link = document.querySelector("link[rel='icon']");
+          if (link) {
+            link.type = 'image/png';
+            link.href = logo;
+          }
+        }
+        if (name) {
+          var brand = document.getElementById('splash-brand');
+          if (brand) brand.textContent = name;
+          document.title = name;
+        }
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

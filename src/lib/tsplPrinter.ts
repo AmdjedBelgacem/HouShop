@@ -95,19 +95,100 @@ export async function listPrinters(): Promise<string[]> {
   return invoke<string[]>('list_printers');
 }
 
-/** Paper presets: physical dimensions of the loaded die-cut labels. */
+/** Paper presets: physical dimensions of the loaded media. */
 export interface PaperPreset {
-  key: 'medium' | 'small';
+  key: string;
   label: string;
   widthMm: number;
   heightMm: number;
   gapMm: number;
 }
 
+/** Product barcode tags (small die-cut labels). */
 export const PAPER_PRESETS: PaperPreset[] = [
   { key: 'medium', label: '35×34mm', widthMm: 35, heightMm: 34, gapMm: 2 },
   { key: 'small', label: '25.4×17mm', widthMm: 25.4, heightMm: 17, gapMm: 2 },
 ];
+
+/**
+ * Larger delivery / shipping papers for Xprinter TSPL printers.
+ * 100×150mm (4×6") is the common courier shipping label size.
+ */
+export const DELIVERY_PAPER_PRESETS: PaperPreset[] = [
+  { key: 'delivery_4x6', label: '100×150mm (4×6")', widthMm: 100, heightMm: 150, gapMm: 3 },
+  { key: 'delivery_4x4', label: '100×100mm (4×4")', widthMm: 100, heightMm: 100, gapMm: 3 },
+  { key: 'delivery_80x150', label: '80×150mm', widthMm: 80, heightMm: 150, gapMm: 3 },
+  { key: 'delivery_80x120', label: '80×120mm', widthMm: 80, heightMm: 120, gapMm: 3 },
+];
+
+/** Invoice / receipt-style papers (thermal, larger than barcode tags). */
+export const INVOICE_PAPER_PRESETS: PaperPreset[] = [
+  { key: 'invoice_80x200', label: '80×200mm', widthMm: 80, heightMm: 200, gapMm: 3 },
+  { key: 'invoice_80x150', label: '80×150mm', widthMm: 80, heightMm: 150, gapMm: 3 },
+  { key: 'invoice_100x150', label: '100×150mm', widthMm: 100, heightMm: 150, gapMm: 3 },
+  { key: 'invoice_100x100', label: '100×100mm', widthMm: 100, heightMm: 100, gapMm: 3 },
+];
+
+const SAVED_DELIVERY_SETTINGS_KEY = 'tspl_delivery_settings';
+const SAVED_INVOICE_SETTINGS_KEY = 'tspl_invoice_settings';
+
+export interface SavedDocumentSettings {
+  paperKey: string;
+  density: number;
+  direction: number;
+  shift: number;
+  shiftX: number;
+}
+
+export function getSavedDocumentSettings(kind: 'delivery' | 'invoice'): SavedDocumentSettings | null {
+  try {
+    const key = kind === 'delivery' ? SAVED_DELIVERY_SETTINGS_KEY : SAVED_INVOICE_SETTINGS_KEY;
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') return parsed as SavedDocumentSettings;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function setSavedDocumentSettings(kind: 'delivery' | 'invoice', settings: SavedDocumentSettings): void {
+  try {
+    const key = kind === 'delivery' ? SAVED_DELIVERY_SETTINGS_KEY : SAVED_INVOICE_SETTINGS_KEY;
+    localStorage.setItem(key, JSON.stringify(settings));
+  } catch {
+    // non-fatal
+  }
+}
+
+/** Send an already-packed 1-bit bitmap via the same RAW TSPL path as barcode labels. */
+export async function printPackedBitmap(
+  printerName: string,
+  bitmap: { widthPx: number; heightPx: number; packedBase64: string },
+  paper: PaperPreset,
+  opts: TsplPrintOpts,
+): Promise<void> {
+  if (!printerName) {
+    throw new Error('No printer selected. Pick a printer from the dropdown.');
+  }
+  await invoke('print_label', {
+    printerName,
+    widthPx: bitmap.widthPx,
+    heightPx: bitmap.heightPx,
+    packedBase64: bitmap.packedBase64,
+    opts: {
+      density: opts.density,
+      direction: opts.direction,
+      shift: opts.shift,
+      shift_x: opts.shiftX,
+      label_height_mm: opts.labelHeightMm,
+      label_width_mm: opts.labelWidthMm,
+      gap_mm: opts.gapMm,
+      copies: opts.copies,
+    },
+  });
+}
 
 /**
  * Render the label to a 1-bit bitmap and send it to the printer via RAW spooler injection.
@@ -136,20 +217,5 @@ export async function printLabel(
   });
 
   // Step 4 (Rust): wrap in TSPL + inject via RAW Windows Spooler.
-  await invoke('print_label', {
-    printerName,
-    widthPx: bitmap.widthPx,
-    heightPx: bitmap.heightPx,
-    packedBase64: bitmap.packedBase64,
-    opts: {
-      density: opts.density,
-      direction: opts.direction,
-      shift: opts.shift,
-      shift_x: opts.shiftX,
-      label_height_mm: opts.labelHeightMm,
-      label_width_mm: opts.labelWidthMm,
-      gap_mm: opts.gapMm,
-      copies: opts.copies,
-    },
-  });
+  await printPackedBitmap(printerName, bitmap, paper, opts);
 }

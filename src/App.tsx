@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 import { AuthProvider, useAuth } from './hooks/useAuth';
+import { BrandingProvider } from './hooks/useBranding';
 import { I18nProvider, useI18n } from './i18n';
 import { ThemeProvider, useTheme } from './theme';
 import Layout from './components/Layout';
@@ -95,9 +96,11 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <I18nProvider>
         <ThemeProvider>
-          <AuthProvider>
-            <AppContent />
-          </AuthProvider>
+          <BrandingProvider>
+            <AuthProvider>
+              <AppContent />
+            </AuthProvider>
+          </BrandingProvider>
         </ThemeProvider>
       </I18nProvider>
     </QueryClientProvider>

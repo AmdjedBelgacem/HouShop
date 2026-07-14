@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useI18n } from '../i18n';
-import logoImg from '../assets/logo.png';
+import { useBranding } from '../hooks/useBranding';
 import UpdateBanner from './UpdateBanner';
 import {
   LayoutGrid, ClipboardList, Clock, Users, ShoppingCart, Plus,
@@ -26,6 +26,7 @@ const navItemKeys: { id: Page; key: string; icon: ReactNode }[] = [
 export default function Layout({ children, currentPage, onNavigate }: LayoutProps) {
   const { user, logout } = useAuth();
   const { t } = useI18n();
+  const { logoUrl, shopName } = useBranding();
   const displayName = user?.username
     ? `${user.username.charAt(0).toUpperCase()}${user.username.slice(1)} Hou`
     : 'Admin Hou';
@@ -36,10 +37,10 @@ export default function Layout({ children, currentPage, onNavigate }: LayoutProp
         style={{ boxShadow: '0 4px 24px rgba(0,0,0,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
         {}
         <div className="px-5 pt-5 pb-4 flex items-center gap-3">
-          <img src={logoImg} alt="HouPhone Shop" className="h-11 w-auto object-contain flex-shrink-0" />
+          <img src={logoUrl} alt={shopName} className="h-11 w-auto object-contain flex-shrink-0" />
           <div>
             <h1 className="text-[15px] font-bold text-text-primary leading-tight tracking-tight">
-              HouPhone Shop
+              {shopName}
             </h1>
             <p className="text-[10.5px] font-medium text-text-muted tracking-[0.03em]">
               {t('sidebar.managementSuite')}

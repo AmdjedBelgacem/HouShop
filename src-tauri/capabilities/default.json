@@ -5,6 +5,7 @@
   "permissions": [
     "core:default",
     "core:webview:allow-print",
+    "core:window:allow-set-icon",
     "shell:allow-open"
   ]
 }

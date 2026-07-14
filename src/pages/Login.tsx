@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAuth } from '../hooks/useAuth';
 import { useI18n } from '../i18n';
+import { useBranding } from '../hooks/useBranding';
 import type { LoginResponse } from '../lib/types';
 import { Eye, EyeOff, User, Lock, ArrowRight, Loader2 } from 'lucide-react';
-import logoImg from '../assets/logo.png';
 export default function Login() {
   const { login } = useAuth();
   const { t } = useI18n();
+  const { logoUrl, shopName } = useBranding();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -45,10 +46,10 @@ export default function Login() {
         {}
         <div className="relative z-10 flex flex-col items-center text-center px-12">
           <div className="w-24 h-24 rounded-3xl bg-white/10 backdrop-blur-sm flex items-center justify-center mb-8 shadow-2xl border border-white/10">
-            <img src={logoImg} alt="" className="w-16 h-16 object-contain" />
+            <img src={logoUrl} alt="" className="w-16 h-16 object-contain" />
           </div>
           <h1 className="text-[36px] font-bold text-white leading-tight tracking-tight mb-3">
-            HouPhone Shop
+            {shopName}
           </h1>
           <p className="text-[13px] font-medium text-white/40 tracking-[0.15em] uppercase mb-8">
             {t('sidebar.managementSuite')}
@@ -71,9 +72,9 @@ export default function Login() {
         {}
         <div className="lg:hidden flex flex-col items-center mb-10">
           <div className="w-16 h-16 rounded-2xl bg-navy flex items-center justify-center mb-4 shadow-lg">
-            <img src={logoImg} alt="" className="w-10 h-10 object-contain" />
+            <img src={logoUrl} alt="" className="w-10 h-10 object-contain" />
           </div>
-          <h1 className="text-[22px] font-bold text-text-primary">HouPhone Shop</h1>
+          <h1 className="text-[22px] font-bold text-text-primary">{shopName}</h1>
           <p className="text-[11px] text-text-muted tracking-[0.1em] uppercase mt-1">{t('sidebar.managementSuite')}</p>
         </div>
         <div className="w-full max-w-[380px]">

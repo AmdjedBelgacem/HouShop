@@ -518,8 +518,11 @@ function layoutBarcode(
  * (white content on a black background) with the spec polarity, so we invert:
  * a dark source pixel → 0 in the packed byte. Toggling `DIRECTION` in the UI
  * can also flip this, but inverting at pack time is the reliable default.
+ *
+ * Exported so delivery/invoice renderers can reuse the same packing path as
+ * barcode labels (identical Xprinter polarity).
  */
-function packMonochrome(
+export function packMonochrome(
   ctx: CanvasRenderingContext2D,
   widthPx: number,
   heightPx: number,

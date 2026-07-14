@@ -293,3 +293,15 @@ pub fn get_images_dir(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| format!("Failed to create images dir: {}", e))?;
     Ok(images_dir)
 }
+
+/// App branding assets (custom logo, etc.) live under `<app_data>/branding/`.
+pub fn get_branding_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    let branding_dir = app_data.join("branding");
+    fs::create_dir_all(&branding_dir)
+        .map_err(|e| format!("Failed to create branding dir: {}", e))?;
+    Ok(branding_dir)
+}

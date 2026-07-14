@@ -1,17 +1,23 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { useI18n } from '../i18n';
 import type { Language } from '../i18n';
 import { useTheme } from '../theme';
+import { useBranding, DEFAULT_SHOP_NAME } from '../hooks/useBranding';
 import CustomSelect from '../components/CustomSelect';
+import { toast } from 'sonner';
 import {
   Pencil, Shield, Settings, Grid3x3, Clock, Eye, EyeOff,
   MapPin, Laptop, Smartphone, Monitor, ExternalLink, Globe, Moon,
+  ImagePlus, Trash2, Loader2, Store,
 } from 'lucide-react';
 export default function Profile() {
   const { user } = useAuth();
   const { t, lang, setLang } = useI18n();
   const { isDark, toggleTheme } = useTheme();
+  const { logoUrl, logoPath, shopName, saveLogo, resetLogo } = useBranding();
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const [logoBusy, setLogoBusy] = useState(false);
   const displayName = user?.username
     ? `${user.username.charAt(0).toUpperCase()}${user.username.slice(1)} Hou`
     : 'Alex Hou';
@@ -27,6 +33,46 @@ export default function Profile() {
   const [loginAlerts, setLoginAlerts] = useState(true);
   const [emailNotif, setEmailNotif] = useState(false);
   const [compactMode, setCompactMode] = useState(false);
+
+  const handleLogoPick = async (file: File | null) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast.error(t('profile.logoInvalidType'));
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      toast.error(t('profile.logoTooLarge'));
+      return;
+    }
+    setLogoBusy(true);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+      });
+      await saveLogo(dataUrl, file.name);
+      toast.success(t('profile.logoSaved'));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t('profile.logoSaveFailed'));
+    } finally {
+      setLogoBusy(false);
+      if (logoInputRef.current) logoInputRef.current.value = '';
+    }
+  };
+
+  const handleLogoReset = async () => {
+    setLogoBusy(true);
+    try {
+      await resetLogo();
+      toast.success(t('profile.logoReset'));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t('profile.logoSaveFailed'));
+    } finally {
+      setLogoBusy(false);
+    }
+  };
   const sessions = useMemo(() => {
     const ua = navigator.userAgent;
     const isMac = /Mac/.test(ua);
@@ -79,6 +125,57 @@ export default function Profile() {
         </button>
       </div>
       {}
+      {/* Shop branding — logo drives sidebar + window/app icon */}
+      <div className="card p-6 mb-6">
+        <div className="flex items-center gap-2 mb-5">
+          <Store size={16} className="text-text-muted" />
+          <h3 className="text-[15px] font-bold text-text-primary">{t('profile.branding')}</h3>
+        </div>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-5">
+          <div className="w-24 h-24 rounded-2xl border border-border bg-surface flex items-center justify-center overflow-hidden flex-shrink-0 shadow-sm">
+            <img src={logoUrl} alt="Shop logo" className="w-full h-full object-contain p-2" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[13px] font-medium text-text-primary">{t('profile.shopLogo')}</p>
+            <p className="text-[12px] text-text-muted mt-1 leading-relaxed">
+              {t('profile.shopLogoDesc')}
+            </p>
+            <div className="flex flex-wrap items-center gap-2 mt-3">
+              <input
+                ref={logoInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                className="hidden"
+                onChange={e => handleLogoPick(e.target.files?.[0] ?? null)}
+              />
+              <button
+                type="button"
+                disabled={logoBusy}
+                onClick={() => logoInputRef.current?.click()}
+                className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-navy text-white text-[12.5px] font-medium hover:bg-navy-light transition-colors disabled:opacity-50"
+              >
+                {logoBusy ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />}
+                {t('profile.uploadLogo')}
+              </button>
+              {logoPath && (
+                <button
+                  type="button"
+                  disabled={logoBusy}
+                  onClick={handleLogoReset}
+                  className="flex items-center gap-2 px-3.5 py-2 rounded-lg border border-border text-[12.5px] font-medium text-text-secondary hover:bg-surface hover:text-accent-red transition-colors disabled:opacity-50"
+                >
+                  <Trash2 size={14} />
+                  {t('profile.resetLogo')}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+      {}
+      {/* Shop name — drives sidebar, login, splash, printed docs, and the OS window title */}
+      <ShopNameEditor key={shopName} />
+
       <div className="grid grid-cols-5 gap-6 mb-6">
         {}
         <div className="col-span-3 card p-6">
@@ -242,6 +339,73 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div>
       <label className="block text-[11px] font-semibold text-text-muted tracking-[0.06em] uppercase mb-1.5">{label}</label>
       {children}
+    </div>
+  );
+}
+function ShopNameEditor() {
+  const { t } = useI18n();
+  const { shopName, saveShopName, resetShopName } = useBranding();
+  const [draft, setDraft] = useState(shopName);
+  const saved = draft.trim() === shopName;
+  const handleSave = async () => {
+    try {
+      await saveShopName(draft);
+      toast.success(t('profile.shopNameSaved'));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t('profile.shopNameSaveFailed'));
+    }
+  };
+  const handleReset = async () => {
+    try {
+      await resetShopName();
+      toast.success(t('profile.shopNameReset'));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t('profile.shopNameSaveFailed'));
+    }
+  };
+  return (
+    <div className="card p-6 mb-6">
+      <div className="flex items-center gap-2 mb-5">
+        <Store size={16} className="text-text-muted" />
+        <h3 className="text-[15px] font-bold text-text-primary">{t('profile.shopName')}</h3>
+      </div>
+      <div className="flex flex-col sm:flex-row sm:items-end gap-4">
+        <div className="flex-1 min-w-0">
+          <p className="text-[13px] font-medium text-text-primary">{t('profile.shopNameLabel')}</p>
+          <p className="text-[12px] text-text-muted mt-1 leading-relaxed">
+            {t('profile.shopNameDesc')}
+          </p>
+          <input
+            type="text"
+            value={draft}
+            maxLength={48}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !saved) handleSave(); }}
+            placeholder={DEFAULT_SHOP_NAME}
+            className="form-input mt-3"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={saved}
+            onClick={handleSave}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-navy text-white text-[12.5px] font-medium hover:bg-navy-light transition-colors disabled:opacity-50"
+          >
+            {t('profile.saveShopName')}
+          </button>
+          {shopName !== DEFAULT_SHOP_NAME && (
+            <button
+              type="button"
+              onClick={handleReset}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-lg border border-border text-[12.5px] font-medium text-text-secondary hover:bg-surface hover:text-accent-red transition-colors"
+            >
+              <Trash2 size={14} />
+              {t('profile.resetShopName')}
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
