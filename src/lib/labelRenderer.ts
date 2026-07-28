@@ -33,8 +33,9 @@ export interface LabelVisibility {
 /**
  * Per-element styling overrides. Each entry optionally scales the element's
  * font size (`fontScale`, 1.0 = default) and nudges its vertical position
- * (`offsetY`, dots, +down / -up). Affects only its own element; the rest of
- * the layout (centering, stacking) is recomputed from the resulting heights.
+ * (`offsetY`, dots, +down / -up). Name and variant share the same typeface;
+ * only scale/offset differ. Growing font size reflows words onto extra lines
+ * instead of truncating — layout height/centering recompute from the result.
  */
 export interface LabelStyling {
   name?: { fontScale?: number; offsetY?: number };
@@ -83,10 +84,16 @@ export interface RenderLabelInput {
   barcodeSize?: BarcodeSize;
   /**
    * When true, merge the variant title into the product name as a single
-   * inline title line (e.g. "Product — Red"), drawn at the name's font size.
-   * The standalone variant block is then skipped. Default false.
+   * inline title line, drawn at the name's font size. The standalone variant
+   * block is then skipped. Default false.
    */
   combineNameVariant?: boolean;
+  /**
+   * Text inserted between product name and variant when `combineNameVariant`
+   * is on. Default is a single space — no dash unless the merchant sets one
+   * (e.g. `" - "`, `" — "`, `" / "`).
+   */
+  nameVariantSeparator?: string;
   /** Canvas width in printer dots (e.g. 280 for 35mm @ 203 DPI). Must be a multiple of 8. */
   widthPx: number;
   /** Canvas height in printer dots (e.g. 360 for 45mm @ 203 DPI). */
@@ -107,65 +114,81 @@ export interface RenderedBitmap {
 const fmt = (n: number) =>
   `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DA`;
 
+/** Shared typeface for product name + variant (same weight / family). */
+const LABEL_TITLE_FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+const LABEL_TITLE_WEIGHT = 700;
+
 /**
- * Word-wrap a string to fit `maxWidthPx` for the given font, breaking only on
- * spaces. Lines that still overflow are hard-cut.
+ * Hard-break a single token that is wider than `maxWidthPx` into as many
+ * character chunks as needed so every piece fits. Used only when a word itself
+ * cannot fit on one line — never to drop content.
+ */
+function breakOversizedWord(
+  ctx: CanvasRenderingContext2D,
+  word: string,
+  maxWidthPx: number,
+): string[] {
+  if (ctx.measureText(word).width <= maxWidthPx) return [word];
+  const parts: string[] = [];
+  let chunk = '';
+  for (const ch of word) {
+    const candidate = chunk + ch;
+    if (chunk && ctx.measureText(candidate).width > maxWidthPx) {
+      parts.push(chunk);
+      chunk = ch;
+    } else {
+      chunk = candidate;
+    }
+  }
+  if (chunk) parts.push(chunk);
+  return parts.length > 0 ? parts : [word];
+}
+
+/**
+ * Word-wrap text to fit `maxWidthPx` for the current `ctx.font`.
+ *
+ * - Breaks on spaces so words reflow onto new lines when the font grows.
+ * - Never drops or truncates words to hide overflow — extra lines push the
+ *   layout instead (caller repositions from the resulting line count).
+ * - Only character-splits a token that is wider than the line by itself.
  */
 function wrapLines(
   ctx: CanvasRenderingContext2D,
   text: string,
   maxWidthPx: number,
-  maxLines: number,
 ): string[] {
-  const words = text.split(/\s+/).filter(Boolean);
+  const raw = String(text ?? '').trim();
+  if (!raw) return [];
+  const words = raw.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
   let current = '';
-  for (const word of words) {
-    const candidate = current ? `${current} ${word}` : word;
-    if (ctx.measureText(candidate).width <= maxWidthPx || !current) {
-      current = candidate;
-    } else {
+
+  const flush = () => {
+    if (current) {
       lines.push(current);
-      current = word;
-      if (lines.length >= maxLines) break;
+      current = '';
+    }
+  };
+
+  for (const word of words) {
+    const pieces = breakOversizedWord(ctx, word, maxWidthPx);
+    for (const piece of pieces) {
+      const candidate = current ? `${current} ${piece}` : piece;
+      if (!current || ctx.measureText(candidate).width <= maxWidthPx) {
+        current = candidate;
+      } else {
+        flush();
+        current = piece;
+      }
     }
   }
-  if (current && lines.length < maxLines) lines.push(current);
-  // Hard-cut any overflowing tail line.
-  return lines.slice(0, maxLines).map(line => {
-    if (ctx.measureText(line).width <= maxWidthPx) return line;
-    let lo = 0;
-    let hi = line.length;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >> 1;
-      if (ctx.measureText(line.slice(0, mid)).width <= maxWidthPx) lo = mid;
-      else hi = mid - 1;
-    }
-    return line.slice(0, lo);
-  });
+  flush();
+  return lines;
 }
 
-/** Pick a font size (px) so the name fills the available width without overflowing. */
-function fitNameFont(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  maxWidthPx: number,
-  maxHeightPx: number,
-  maxLines: number,
-): { fontPx: number; lines: string[] } {
-  // Start near the design size and shrink until it fits.
-  let fontPx = Math.floor(maxHeightPx / maxLines / 1.15);
-  for (; fontPx >= 6; fontPx -= 1) {
-    ctx.font = `900 ${fontPx}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-    const lines = wrapLines(ctx, text, maxWidthPx, maxLines);
-    const totalHeight = lines.length * fontPx * 1.15;
-    const widest = Math.max(...lines.map(l => ctx.measureText(l).width));
-    if (totalHeight <= maxHeightPx && widest <= maxWidthPx) {
-      return { fontPx, lines };
-    }
-  }
-  ctx.font = `900 6px system-ui, -apple-system, "Segoe UI", sans-serif`;
-  return { fontPx: 6, lines: wrapLines(ctx, text, maxWidthPx, maxLines) };
+/** Build `font` CSS for title-weight label text (name and variant share this). */
+function titleFontCss(fontPx: number): string {
+  return `${LABEL_TITLE_WEIGHT} ${fontPx}px ${LABEL_TITLE_FONT}`;
 }
 
 // ─── Crisp EAN-13 (integer modules, no scaled bitmaps) ─────────────────────
@@ -590,10 +613,12 @@ function drawLabel(
   ctx.textBaseline = 'top';
   ctx.imageSmoothingEnabled = false;
 
-  // Side padding keeps quiet zones / text off the die-cut edge. Content is
-  // still free to move with shiftX so the merchant can match left-rail media.
-  const padX = Math.max(4, Math.round(widthPx * 0.04));
-  const nameMaxWidth = widthPx - padX * 2;
+  // Minimal side inset for wrapping/measurement only. Horizontal position is
+  // controlled entirely by shiftX via placeX — far-left must be able to reach
+  // x=0 (true paper edge), not get stuck on a padded “almost left” that still
+  // looks centered on the physical tag.
+  const padX = Math.max(2, Math.round(widthPx * 0.02));
+  const nameMaxWidth = Math.max(8, widthPx - padX * 2);
 
   // --- PASS 1: measure all content heights so we can center vertically ---
   // Layout: name (small) → variant title (smaller) → price (large) → barcode.
@@ -607,38 +632,47 @@ function drawLabel(
   const combine = !!input.combineNameVariant && vis.name && vis.variant && !!variantRaw;
   const variantText = combine ? '' : (vis.variant && variantName ? variantRaw : '');
 
-  // The title text used for fitting/wrapping. When combining, append the variant
-  // with an em dash so it reads as "Product — Variant" on one (wrapped) block.
+  // Combined title: product + optional separator + variant. Default separator is
+  // a single space (no dash) — merchant can set nameVariantSeparator to " - " etc.
+  const separator = input.nameVariantSeparator ?? ' ';
   const titleText = combine && productName
-    ? `${productName} — ${variantRaw}`
+    ? `${productName}${separator}${variantRaw}`
     : (productName || '');
 
   // Base font sizes, then scaled per-element by the user's styling overrides.
+  // Name and variant share the same typeface/weight; only size/position differ.
   // Clamped to a sensible minimum so scaling down never produces invisible text.
   const nameFont = Math.max(5, Math.round(widthPx * 0.045 * style.name.fontScale));
-  const variantFont = Math.max(4, Math.round(widthPx * 0.038 * style.variant.fontScale));
+  const variantFont = Math.max(5, Math.round(widthPx * 0.045 * style.variant.fontScale));
   const priceFont = Math.max(7, Math.round(widthPx * 0.11 * style.price.fontScale));
 
+  // Wrap at the *actual* drawn font size so growing Size reflows words onto new
+  // lines instead of truncating/hiding them. No max-line cap.
+  ctx.font = titleFontCss(nameFont);
   const nameLines =
-    vis.name && productName
-      ? fitNameFont(ctx, titleText, nameMaxWidth, Math.round(heightPx * 0.18 * style.name.fontScale), 2).lines
+    vis.name && titleText
+      ? wrapLines(ctx, titleText, nameMaxWidth)
       : [];
   const nameLineHeight = nameFont * 1.12;
   const nameBlockH = nameLines.length * nameLineHeight;
 
-  ctx.font = `400 ${variantFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-  const variantBlockH = variantText ? variantFont * 1.2 : 0;
+  ctx.font = titleFontCss(variantFont);
+  const variantLines = variantText
+    ? wrapLines(ctx, variantText, nameMaxWidth)
+    : [];
+  const variantLineHeight = variantFont * 1.12;
+  const variantBlockH = variantLines.length * variantLineHeight;
 
-  ctx.font = `900 ${priceFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  ctx.font = `900 ${priceFont}px ${LABEL_TITLE_FONT}`;
   const priceBlockH = priceText ? priceFont * 1.2 : 0;
 
-  // Barcode uses the full label width by default so we can keep 2-dot modules
-  // on 25mm tags. Saved settings below 0.8 are clamped back up because they
-  // produce skinny bars and clipped human-readable digits on small labels.
-  const barcodeSafeX = Math.max(4, Math.round(widthPx * 0.025));
+  // Barcode may use the full label width so 2-dot modules fit on 25mm tags.
+  // Side “safe” margin is 0 — horizontal placement (including true far-left)
+  // is handled by placeX + shiftX, not by baking in centered side gaps.
+  // Saved settings below 0.8 are clamped back up (skinny bars scan poorly).
   const barAreaWidth = Math.max(
     8,
-    Math.floor((widthPx - barcodeSafeX * 2) * Math.min(1, Math.max(0.8, bsize.widthScale * bsize.scale))),
+    Math.floor(widthPx * Math.min(1, Math.max(0.8, bsize.widthScale * bsize.scale))),
   );
   // Taller default bars (~38% of label height) — scanners need vertical mass.
   const defaultBarH = Math.round(heightPx * 0.38) * Math.max(0.7, bsize.heightScale) * Math.max(0.8, bsize.scale);
@@ -671,23 +705,27 @@ function drawLabel(
   // Vertical center offset. Floor so we don't blur rows across dot boundaries.
   let cursorY = Math.max(2, Math.floor((heightPx - totalContentH) / 2));
 
-  // Horizontal placement helper: center within the label, then apply shiftX.
-  // Clamped so a large left/right offset never fully ejects content off-canvas
-  // (which previously made barcodes "disappear" on the XP-350B after calibration).
-  const placeX = (elementWidth: number, edgePad = padX): number => {
-    if (elementWidth >= widthPx - edgePad * 2) {
-      return Math.round((widthPx - elementWidth) / 2);
-    }
-    const centered = (widthPx - elementWidth) / 2;
-    const raw = centered + shiftX;
-    const minX = edgePad;
-    const maxX = widthPx - elementWidth - edgePad;
-    return Math.round(Math.max(minX, Math.min(maxX, raw)));
+  // Horizontal placement: start from geometric center, then apply shiftX.
+  //
+  // Critical for left-rail printers (XP-350B): far-left must reach x = 0 (the
+  // true left edge of the paper bitmap). The old helper (a) ignored shiftX for
+  // near-full-width elements like the barcode and (b) clamped to a side pad —
+  // so “far left” in the UI still printed near the middle of the sticker.
+  //
+  // Clamp only so the element stays on-canvas (at least flush with an edge).
+  // shiftX is always applied, including for full-width barcodes.
+  const placeX = (elementWidth: number): number => {
+    const w = Math.max(1, Math.min(Math.round(elementWidth), widthPx));
+    const centered = (widthPx - w) / 2;
+    const raw = Math.round(centered + shiftX);
+    const minX = 0; // true left edge of the paper
+    const maxX = Math.max(0, widthPx - w); // true right flush
+    return Math.max(minX, Math.min(maxX, raw));
   };
 
-  // --- PASS 2: draw name (centered, sized) -------------------------------
+  // --- PASS 2: draw name (centered, sized, multi-line reflow) ------------
   // Each element's draw Y also gets its own offsetY nudge (dots).
-  ctx.font = `700 ${nameFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  ctx.font = titleFontCss(nameFont);
   const nameStartY = cursorY + style.name.offsetY;
   let nameY = nameStartY;
   for (const line of nameLines) {
@@ -697,12 +735,17 @@ function drawLabel(
   }
   cursorY += nameBlockH;
 
-  // --- PASS 2: variant title (centered, smaller than name) ---------------
-  if (variantText) {
+  // --- PASS 2: variant (same font as name; size/pos via StyleRow) --------
+  if (variantLines.length > 0) {
     cursorY += gapNameVariant;
-    ctx.font = `400 ${variantFont}px system-ui, -apple-system, "Segoe UI", sans-serif`;
-    const vw = ctx.measureText(variantText).width;
-    ctx.fillText(variantText, placeX(vw), cursorY + style.variant.offsetY);
+    ctx.font = titleFontCss(variantFont);
+    const variantStartY = cursorY + style.variant.offsetY;
+    let variantY = variantStartY;
+    for (const line of variantLines) {
+      const vw = ctx.measureText(line).width;
+      ctx.fillText(line, placeX(vw), variantY);
+      variantY += variantLineHeight;
+    }
     cursorY += variantBlockH;
   }
 
@@ -717,9 +760,11 @@ function drawLabel(
 
   // --- PASS 2: barcode (flush under the price) --------------------------
   // Drawn 1:1 at integer coordinates — no drawImage scaling.
+  // With shiftX at far left, dx → 0 so the barcode block starts on the left
+  // edge of the paper (same rule as title/price).
   if (barcodeLayout) {
     cursorY += gapPriceBar;
-    const dx = placeX(barcodeLayout.width, barcodeSafeX);
+    const dx = placeX(barcodeLayout.width);
     const dy = Math.round(cursorY + 2);
     barcodeLayout.draw(ctx, dx, dy);
   }

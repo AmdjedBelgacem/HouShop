@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
@@ -8,29 +8,19 @@ import type {
   CreateInventoryTransaction,
   ProductVariant,
 } from '../lib/types';
-import CustomSelect from '../components/CustomSelect';
+import ProductFilter from '../components/ProductFilter';
+import { useProductFilterState } from '../hooks/useProductFilterState';
 import BarcodePrintModal from '../components/BarcodePrintModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { useI18n } from '../i18n';
 import {
-  Search, Plus, Edit3, Trash2, PackagePlus, X,
-  ArrowUpDown, ScanBarcode, Layers, ChevronDown, ChevronUp, MoveRight,
+  Plus, Edit3, Trash2, PackagePlus, X,
+  ArrowUpDown, ScanBarcode, Layers, ChevronDown, ChevronUp, MoveRight, Search,
 } from 'lucide-react';
 
-const PRODUCT_CATEGORY_FILTER_KEY = 'houshop.products.categoryFilter';
+const PRODUCT_FILTER_STORAGE_KEY = 'houshop.products.filters';
 
 type ProductSortField = 'name' | 'category_name' | 'quantity' | 'cost_price' | 'selling_price';
-
-function loadSavedCategoryFilter(): number | null {
-  try {
-    const raw = localStorage.getItem(PRODUCT_CATEGORY_FILTER_KEY);
-    if (!raw) return null;
-    const id = Number(raw);
-    return Number.isFinite(id) ? id : null;
-  } catch {
-    return null;
-  }
-}
 
 interface ProductsProps {
   onAddProduct: () => void;
@@ -40,8 +30,7 @@ interface ProductsProps {
 export default function Products({ onAddProduct, onEditProduct }: ProductsProps) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
-  const [search, setSearch] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState<number | null>(loadSavedCategoryFilter);
+  const { filters, updateFilters, clearFilters } = useProductFilterState(PRODUCT_FILTER_STORAGE_KEY);
   const [showStock, setShowStock] = useState(false);
   const [stockProduct, setStockProduct] = useState<Product | null>(null);
   const [sortField, setSortField] = useState<ProductSortField>('name');
@@ -62,29 +51,15 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
   const [loadingMoveVariants, setLoadingMoveVariants] = useState(false);
 
   const { data: products, isLoading } = useQuery({
-    queryKey: ['products', search],
-    queryFn: () => search
-      ? invoke<Product[]>('search_products', { query: search })
+    queryKey: ['products', filters.search],
+    queryFn: () => filters.search
+      ? invoke<Product[]>('search_products', { query: filters.search })
       : invoke<Product[]>('get_products'),
   });
   const { data: categories } = useQuery({
     queryKey: ['categories'],
     queryFn: () => invoke<Category[]>('get_categories'),
   });
-
-  useEffect(() => {
-    try {
-      if (categoryFilter == null) localStorage.removeItem(PRODUCT_CATEGORY_FILTER_KEY);
-      else localStorage.setItem(PRODUCT_CATEGORY_FILTER_KEY, String(categoryFilter));
-    } catch {
-      // Non-critical: filtering still works even if storage is unavailable.
-    }
-  }, [categoryFilter]);
-
-  useEffect(() => {
-    if (categoryFilter == null || !categories) return;
-    if (!categories.some(c => c.id === categoryFilter)) setCategoryFilter(null);
-  }, [categories, categoryFilter]);
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => invoke('delete_product', { id }),
@@ -216,7 +191,17 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
   };
 
   const filteredProducts = [...(products ?? [])]
-    .filter(p => categoryFilter === null || p.category_id === categoryFilter)
+    .filter(p => filters.categoryId === null || p.category_id === filters.categoryId)
+    .filter(p => {
+      if (filters.minPrice && p.selling_price < parseFloat(filters.minPrice)) return false;
+      if (filters.maxPrice && p.selling_price > parseFloat(filters.maxPrice)) return false;
+      return true;
+    })
+    .filter(p => {
+      if (filters.stockStatus === 'in-stock') return p.quantity > 0;
+      if (filters.stockStatus === 'out-of-stock') return p.quantity <= 0;
+      return true;
+    })
     .sort((a, b) => {
       const mul = sortDir === 'asc' ? 1 : -1;
       if (sortField === 'name') return a.name.localeCompare(b.name) * mul;
@@ -277,25 +262,12 @@ export default function Products({ onAddProduct, onEditProduct }: ProductsProps)
         </div>
       </div>
 
-      <div className="card px-4 py-3 mb-5 flex items-center gap-3">
-        <div className="relative flex-1">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
-          <input
-            type="text"
-            placeholder={t('products.searchPlaceholder')}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 rounded-lg border border-border text-[13px] focus:outline-none focus:ring-2 focus:ring-navy/15 focus:border-navy/30 placeholder:text-text-muted bg-surface"
-          />
-        </div>
-        <CustomSelect
-          value={categoryFilter != null ? String(categoryFilter) : ''}
-          onChange={(v) => setCategoryFilter(v ? Number(v) : null)}
-          options={[{ value: '', label: t('common.allCategories') }, ...(categories ?? []).map(c => ({ value: String(c.id), label: c.name }))]}
-          size="sm"
-          className="w-[180px]"
-        />
-      </div>
+      <ProductFilter
+        filters={filters}
+        onChange={updateFilters}
+        onClear={clearFilters}
+        categories={categories ?? []}
+      />
 
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">

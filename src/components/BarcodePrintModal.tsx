@@ -47,8 +47,11 @@ function isValidEan13Input(value: string): boolean {
 // that looks right on these tags), but the UI shows it as 1.0× so the baseline
 // reads cleanly — the merchant only sees numbers above/below that reference.
 const PRICE_DEFAULT_FONT_SCALE = 1.4;
+// shiftX = 0 is geometric center of the label bitmap. Negative moves left,
+// positive right. Range must cover a full half-label so far-left can pin any
+// element (short title or barcode) flush to x = 0 on both 25mm and 35mm tags.
 const XP350B_CENTER_SHIFT_X = 0;
-const SHIFT_X_RANGE = 160;
+const SHIFT_X_RANGE = 240;
 
 /** Map an internal price fontScale to the value shown in the stepper. */
 function priceFontScaleToDisplay(v: number): number {
@@ -121,9 +124,13 @@ export default function BarcodePrintModal({ barcode, productName, productId, var
   const [showStyling, setShowStyling] = useState(false);
   const [showBarcodeSize, setShowBarcodeSize] = useState(false);
   // When true, the variant title is merged into the product name as a single
-  // inline title line ("Product — Variant") instead of a separate subtitle.
-  // Defaults on (selected) per the requested default.
+  // inline title line instead of a separate subtitle. Defaults on.
   const [combineNameVariant, setCombineNameVariant] = useState<boolean>(saved?.combineNameVariant ?? true);
+  // Joiner between name and variant when merged. Default is a space — no dash
+  // unless the merchant types one (e.g. " - ", " — ", " / ").
+  const [nameVariantSeparator, setNameVariantSeparator] = useState<string>(
+    saved?.nameVariantSeparator ?? ' ',
+  );
   const displayShiftX = tunables.shiftX - XP350B_CENTER_SHIFT_X;
   const minShiftX = XP350B_CENTER_SHIFT_X - SHIFT_X_RANGE;
   const maxShiftX = XP350B_CENTER_SHIFT_X + SHIFT_X_RANGE;
@@ -214,13 +221,14 @@ export default function BarcodePrintModal({ barcode, productName, productId, var
         styling,
         barcodeSize,
         combineNameVariant,
+        nameVariantSeparator,
         widthPx,
         heightPx,
       });
     } catch {
       return null;
     }
-  }, [effectiveBarcode, productName, effectiveVariantName, effectivePrice, barcodeError, paper, tunables.shiftX, visibility, styling, barcodeSize, combineNameVariant]);
+  }, [effectiveBarcode, productName, effectiveVariantName, effectivePrice, barcodeError, paper, tunables.shiftX, visibility, styling, barcodeSize, combineNameVariant, nameVariantSeparator]);
 
   // Load the printer list once on mount.
   useEffect(() => {
@@ -291,6 +299,7 @@ export default function BarcodePrintModal({ barcode, productName, productId, var
           styling,
           barcodeSize,
           combineNameVariant,
+          nameVariantSeparator,
         },
         paper,
         opts,
@@ -306,6 +315,7 @@ export default function BarcodePrintModal({ barcode, productName, productId, var
         styling,
         barcodeSize,
         combineNameVariant,
+        nameVariantSeparator,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -462,8 +472,8 @@ export default function BarcodePrintModal({ barcode, productName, productId, var
                       <MoveHorizontal size={14} strokeWidth={2.25} />
                     </div>
                     <p className="text-[12.5px] text-text-secondary leading-snug">
-                      XP-350B loads labels on the <span className="font-medium text-text-primary">left</span>.
-                      Center is calibrated for that left rail. If the print still leaves empty space on the left, move it left until it sits in the middle of the sticker.
+                      Moves title, price, and barcode together. <span className="font-medium text-text-primary">Center</span> is the middle of the sticker;
+                      push all the way <span className="font-medium text-text-primary">left</span> to pin content (and the barcode) to the left edge of the paper.
                     </p>
                   </div>
 
@@ -553,28 +563,53 @@ export default function BarcodePrintModal({ barcode, productName, productId, var
                   />
                 </div>
                 {effectiveVariantName && (visibility.name ?? true) && (visibility.variant ?? true) && (
-                  <label className="mt-3 flex items-center gap-2.5 cursor-pointer select-none group">
-                    <span
-                      className={`relative inline-flex h-[18px] w-[32px] flex-shrink-0 rounded-full transition-colors ${
-                        combineNameVariant ? 'bg-navy' : 'bg-text-muted/25'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={combineNameVariant}
-                        onChange={e => setCombineNameVariant(e.target.checked)}
-                        className="peer sr-only"
-                      />
+                  <div className="mt-3 space-y-2.5">
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none group">
                       <span
-                        className={`absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white shadow-sm transition-transform ${
-                          combineNameVariant ? 'translate-x-[16px]' : 'translate-x-[2px]'
+                        className={`relative inline-flex h-[18px] w-[32px] flex-shrink-0 rounded-full transition-colors ${
+                          combineNameVariant ? 'bg-navy' : 'bg-text-muted/25'
                         }`}
-                      />
-                    </span>
-                    <span className="text-[12.5px] text-text-secondary group-hover:text-text-primary transition-colors leading-snug">
-                      Merge variant into title
-                    </span>
-                  </label>
+                      >
+                        <input
+                          type="checkbox"
+                          checked={combineNameVariant}
+                          onChange={e => setCombineNameVariant(e.target.checked)}
+                          className="peer sr-only"
+                        />
+                        <span
+                          className={`absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white shadow-sm transition-transform ${
+                            combineNameVariant ? 'translate-x-[16px]' : 'translate-x-[2px]'
+                          }`}
+                        />
+                      </span>
+                      <span className="text-[12.5px] text-text-secondary group-hover:text-text-primary transition-colors leading-snug">
+                        Merge variant into title
+                      </span>
+                    </label>
+                    {combineNameVariant && (
+                      <div className="flex items-center gap-2 pl-[42px]">
+                        <label
+                          htmlFor="name-variant-sep"
+                          className="text-[11.5px] font-medium text-text-muted shrink-0"
+                        >
+                          Separator
+                        </label>
+                        <input
+                          id="name-variant-sep"
+                          type="text"
+                          value={nameVariantSeparator}
+                          onChange={e => setNameVariantSeparator(e.target.value)}
+                          placeholder="space"
+                          maxLength={8}
+                          className="w-24 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[12.5px] text-text-primary font-mono focus:outline-none focus:ring-[3px] focus:ring-navy/12 focus:border-navy/30 transition-shadow"
+                          title='Joiner between name and variant. Leave as a space for no dash; type " - " if you want one.'
+                        />
+                        <span className="text-[11px] text-text-muted truncate min-w-0">
+                          e.g. empty, space, or “ - ”
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 )}
               </Section>
 
@@ -596,7 +631,14 @@ export default function BarcodePrintModal({ barcode, productName, productId, var
                     label="Variant"
                     fontScale={styling.variant?.fontScale ?? 1}
                     offsetY={styling.variant?.offsetY ?? 0}
-                    disabled={!visibility.variant || !variantName}
+                    // Same size/pos knobs as Name; uses the same typeface.
+                    // Disabled when no variant, hidden, or merged into the title
+                    // (combined line is styled by Name).
+                    disabled={
+                      !visibility.variant
+                      || !effectiveVariantName
+                      || (!!combineNameVariant && (visibility.name ?? true))
+                    }
                     onChange={(fs, oy) => setStyling(s => ({ ...s, variant: { fontScale: fs, offsetY: oy } }))}
                   />
                   <StyleRow
@@ -606,6 +648,9 @@ export default function BarcodePrintModal({ barcode, productName, productId, var
                     disabled={!visibility.price || price == null || price <= 0}
                     onChange={(fs, oy) => setStyling(s => ({ ...s, price: { fontScale: priceFontScaleFromDisplay(fs), offsetY: oy } }))}
                   />
+                  <p className="text-[11.5px] text-text-muted leading-relaxed pt-0.5">
+                    Name and variant use the same font. Larger size wraps words onto new lines instead of cutting them off.
+                  </p>
                 </div>
               </Collapsible>
 

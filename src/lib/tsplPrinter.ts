@@ -25,6 +25,8 @@ export interface SavedLabelSettings {
   styling: LabelStyling;
   barcodeSize: BarcodeSize;
   combineNameVariant: boolean;
+  /** Joiner between name and variant when combined. Default space; set e.g. " - " for a dash. */
+  nameVariantSeparator?: string;
 }
 
 /** Load the saved label settings, or null if none stored yet. */

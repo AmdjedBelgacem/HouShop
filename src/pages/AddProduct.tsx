@@ -76,6 +76,40 @@ function getDuplicateBarcodeGroups(variants: FormVariant[]): Array<{ barcode: st
     }));
 }
 
+function ean13CheckDigit(digits: number[]): string {
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    sum += digits[i] * (i % 2 === 0 ? 1 : 3);
+  }
+  return String((10 - (sum % 10)) % 10);
+}
+
+function generateBarcodeValue(): string {
+  const digits: number[] = [];
+  digits.push(Math.floor(Math.random() * 9) + 1);
+  for (let i = 1; i < 12; i++) {
+    digits.push(Math.floor(Math.random() * 10));
+  }
+  return digits.join('') + ean13CheckDigit(digits);
+}
+
+async function generateUniqueBarcode(excludeVariantId?: number): Promise<string> {
+  let candidate = generateBarcodeValue();
+  for (let i = 0; i < 8; i++) {
+    try {
+      const taken = await invoke<boolean>('is_barcode_taken', {
+        barcode: candidate,
+        excludeVariantId: excludeVariantId ?? null,
+      });
+      if (!taken) return candidate;
+    } catch {
+      return candidate;
+    }
+    candidate = generateBarcodeValue();
+  }
+  return candidate;
+}
+
 export default function AddProduct({ onBack, editProduct }: AddProductProps) {
   const isEditing = !!editProduct;
   const queryClient = useQueryClient();
@@ -106,47 +140,6 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
     group.current.forEach(item => catalogConflictByIndex.set(item.index, group));
   });
 
-  function generateBarcodeValue(): string {
-    // 12 random data digits + the EAN-13 check digit, so the stored value
-    // matches exactly what JsBarcode renders and the scanner reads back.
-    const digits: number[] = [];
-    for (let i = 0; i < 12; i++) {
-      digits.push(Math.floor(Math.random() * 10));
-    }
-    return digits.join('') + ean13CheckDigit(digits);
-  }
-  function ean13CheckDigit(digits: number[]): string {
-    let sum = 0;
-    for (let i = 0; i < 12; i++) {
-      sum += digits[i] * (i % 2 === 0 ? 1 : 3);
-    }
-    return String((10 - (sum % 10)) % 10);
-  }
-  /**
-   * Generate a barcode guaranteed unique across the catalog. Retries with fresh
-   * random values until the backend confirms it's unused (two products can't
-   * share a barcode). `excludeVariantId` lets a variant keep its own barcode
-   * when regenerating during an edit. Bounded attempts → falls back to the last
-   * candidate (the unique DB index still rejects a collision at save time).
-   */
-  async function generateUniqueBarcode(excludeVariantId?: number): Promise<string> {
-    let candidate = generateBarcodeValue();
-    for (let i = 0; i < 8; i++) {
-      try {
-        const taken = await invoke<boolean>('is_barcode_taken', {
-          barcode: candidate,
-          excludeVariantId: excludeVariantId ?? null,
-        });
-        if (!taken) return candidate;
-      } catch {
-        // If the check fails, trust the candidate; the insert's unique index is
-        // the final guard.
-        return candidate;
-      }
-      candidate = generateBarcodeValue();
-    }
-    return candidate;
-  }
   const regenerateVariantBarcode = async (index: number) => {
     const excludeId = variants[index]?.id;
     const barcode = await generateUniqueBarcode(excludeId);

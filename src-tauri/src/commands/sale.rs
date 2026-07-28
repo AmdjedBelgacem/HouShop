@@ -55,6 +55,31 @@ pub async fn create_sale(
         // Stock lives on variants. A sale item must carry a variant_id; legacy
         // items without one (pre-migration data) simply skip the stock update.
         if let Some(vid) = item.variant_id {
+            let current_qty: (i64,) = sqlx::query_as("SELECT quantity FROM product_variants WHERE id = ?")
+                .bind(vid)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| format!("Failed to fetch variant stock: {}", e))?;
+            if current_qty.0 <= 0 {
+                sqlx::query(r#"INSERT INTO inventory_transactions (product_id, variant_id, quantity, transaction_type, unit_cost, total_cost, supplier_id, notes)
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?)"#)
+                    .bind(item.product_id)
+                    .bind(vid)
+                    .bind(1)
+                    .bind("adjustment")
+                    .bind(item.unit_cost)
+                    .bind(item.unit_cost * 1.0)
+                    .bind::<Option<i64>>(None)
+                    .bind("Out-of-stock adjustment for sale")
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("Failed to record adjustment: {}", e))?;
+                sqlx::query("UPDATE product_variants SET quantity = quantity + 1, updated_at = datetime('now') WHERE id = ?")
+                    .bind(vid)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("Failed to update variant stock: {}", e))?;
+            }
             sqlx::query("UPDATE product_variants SET quantity = quantity - ?, updated_at = datetime('now') WHERE id = ?")
                 .bind(item.quantity)
                 .bind(vid)

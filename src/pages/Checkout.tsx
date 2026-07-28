@@ -4,11 +4,15 @@ import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
 import { useI18n } from '../i18n';
 import type { Product, Category, ProductVariant, CreateSale, Sale, SaleItemWithProduct, Customer } from '../lib/types';
+import ProductFilter from '../components/ProductFilter';
+import { useProductFilterState } from '../hooks/useProductFilterState';
 import { Plus, Minus, X, ShoppingCart, Package, Layers, Printer } from 'lucide-react';
 import SaleCompletionModal from '../components/SaleCompletionModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import Invoice from '../components/Invoice';
 import ShippingLabel from '../components/ShippingLabel';
+
+const CHECKOUT_FILTER_STORAGE_KEY = 'houshop.checkout.filters';
 interface CheckoutProps {
   scannedProduct?: Product | null;
   /** If the scan matched a variant barcode, this is that variant — auto-add it
@@ -27,7 +31,9 @@ function getCoverImage(imagePath: string | null): string | null {
   try {
     const parsed = JSON.parse(imagePath);
     if (Array.isArray(parsed) && parsed.length > 0) return parsed[0];
-  } catch {  }
+  } catch {
+    // JSON parse failed; fall through to return imagePath.
+  }
   return imagePath;
 }
 export default function Checkout({ scannedProduct, scannedVariant, onScanHandled }: CheckoutProps) {
@@ -35,7 +41,7 @@ export default function Checkout({ scannedProduct, scannedVariant, onScanHandled
   const { t } = useI18n();
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card'>('cash');
-  const [activeCategory, setActiveCategory] = useState<string>('all');
+  const { filters, updateFilters, clearFilters } = useProductFilterState(CHECKOUT_FILTER_STORAGE_KEY, { stockStatus: 'in-stock' });
   const [variantPicker, setVariantPicker] = useState<{ product: Product; variants: ProductVariant[] } | null>(null);
   const [showCompletionModal, setShowCompletionModal] = useState(false);
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
@@ -101,9 +107,7 @@ export default function Checkout({ scannedProduct, scannedVariant, onScanHandled
         const itemKey = item.variant ? `v-${item.variant.id}` : `p-${item.product.id}`;
         return itemKey === key;
       });
-      const stock = variant ? variant.quantity : product.quantity;
       if (existing) {
-        if (existing.quantity >= stock) return prev;
         return prev.map(item => {
           const itemKey = item.variant ? `v-${item.variant.id}` : `p-${item.product.id}`;
           return itemKey === key ? { ...item, quantity: item.quantity + 1 } : item;
@@ -136,7 +140,7 @@ export default function Checkout({ scannedProduct, scannedVariant, onScanHandled
         // If the scan matched a specific variant barcode, add that variant
         // directly — no need to open the picker to re-select it.
         if (scannedVariant) {
-          addToCartWithVariant(scannedProduct, scannedVariant);
+          addToCartWithVariant(scannedProduct, scannedVariant); // eslint-disable-line react-hooks/set-state-in-effect
         } else {
           handleAddToCart(scannedProduct);
         }
@@ -148,9 +152,8 @@ export default function Checkout({ scannedProduct, scannedVariant, onScanHandled
   const updateQty = (idx: number, delta: number) => {
     setCart(prev => prev.map((item, i) => {
       if (i !== idx) return item;
-      const stock = item.variant ? item.variant.quantity : item.product.quantity;
       const newQty = item.quantity + delta;
-      if (newQty <= 0 || newQty > stock) return item;
+      if (newQty <= 0) return item;
       return { ...item, quantity: newQty };
     }));
   };
@@ -164,8 +167,16 @@ export default function Checkout({ scannedProduct, scannedVariant, onScanHandled
     setCart(prev => prev.map((item, i) => i === idx ? { ...item, customPrice: value } : item));
   };
   const filteredProducts = (products ?? []).filter(p => {
-    if (activeCategory === 'all') return true;
-    return (p.category_name ?? '').toLowerCase() === activeCategory.toLowerCase();
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      if (![p.name, p.category_name ?? '', p.sku ?? '', p.barcode ?? '', p.description ?? ''].some(value => value.toLowerCase().includes(q))) return false;
+    }
+    if (filters.categoryId != null && p.category_id !== filters.categoryId) return false;
+    if (filters.minPrice && p.selling_price < parseFloat(filters.minPrice)) return false;
+    if (filters.maxPrice && p.selling_price > parseFloat(filters.maxPrice)) return false;
+    if (filters.stockStatus === 'in-stock') return p.quantity > 0;
+    if (filters.stockStatus === 'out-of-stock') return p.quantity <= 0;
+    return true;
   });
   const subtotal = cart.reduce((sum, item) => sum + item.customPrice * item.quantity, 0);
   const totalCost = cart.reduce((sum, item) => {
@@ -196,10 +207,6 @@ export default function Checkout({ scannedProduct, scannedVariant, onScanHandled
       notes: warrantyNotes || null,
     });
   };
-  const categoryButtons = [
-    { id: 'all', label: t('checkout.allItems') },
-    ...(categories ?? []).map(c => ({ id: c.name, label: c.name })),
-  ];
   const fmt = (n: number) => `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DA`;
   return (
     <div className="flex h-screen overflow-hidden">
@@ -212,19 +219,14 @@ export default function Checkout({ scannedProduct, scannedVariant, onScanHandled
           </p>
         </div>
         {}
-        <div className="flex items-center gap-2 mb-6 flex-wrap">
-          {categoryButtons.map(cat => (
-            <button key={cat.id} onClick={() => setActiveCategory(cat.id)}
-              className={`px-4 py-2 rounded-full text-[12.5px] font-medium transition-colors ${
-                activeCategory === cat.id
-                  ? 'bg-navy text-white'
-                  : 'bg-card border border-border text-text-primary hover:bg-surface'
-              }`}>
-              {cat.label}
-            </button>
-          ))}
-        </div>
-        {}
+        <ProductFilter
+          filters={filters}
+          onChange={updateFilters}
+          onClear={clearFilters}
+          categories={categories ?? []}
+          placeholder={t('checkout.searchProducts')}
+        />
+
         <div className="grid grid-cols-3 gap-4">
           {filteredProducts.length === 0 ? (
             <div className="col-span-3 py-16 text-center text-text-muted">
@@ -268,8 +270,8 @@ export default function Checkout({ scannedProduct, scannedVariant, onScanHandled
                           {t('checkout.inCart', { count: inCartQty })}
                         </span>
                       )}
-                      <button onClick={() => handleAddToCart(p)} disabled={soldOut}
-                        className="w-8 h-8 rounded-full bg-navy text-white flex items-center justify-center hover:bg-navy-light disabled:opacity-30 disabled:cursor-not-allowed transition-colors shadow-sm">
+                      <button onClick={() => handleAddToCart(p)}
+                        className="w-8 h-8 rounded-full bg-navy text-white flex items-center justify-center hover:bg-navy-light disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm">
                         <Plus size={16} strokeWidth={2.5} />
                       </button>
                     </div>
@@ -416,8 +418,7 @@ export default function Checkout({ scannedProduct, scannedVariant, onScanHandled
               {variantPicker.variants.map(v => (
                 <button
                   key={v.id}
-                  onClick={() => v.quantity > 0 && addToCartWithVariant(variantPicker.product, v)}
-                  disabled={v.quantity <= 0}
+                  onClick={() => addToCartWithVariant(variantPicker.product, v)}
                   className="w-full flex items-center gap-3 p-3 rounded-xl border border-border hover:border-navy/30 hover:bg-navy/5 transition-colors text-left disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <div className="w-10 h-10 rounded-lg bg-surface flex items-center justify-center">
