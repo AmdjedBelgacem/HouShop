@@ -22,7 +22,9 @@ function parseImages(imagePath: string | null): string[] {
   try {
     const parsed = JSON.parse(imagePath);
     if (Array.isArray(parsed)) return parsed;
-  } catch {  }
+  } catch {
+    // Not JSON: the value is a single legacy image path
+  }
   return [imagePath];
 }
 function serializeImages(images: string[]): string | null {
@@ -55,11 +57,13 @@ interface CatalogBarcodeConflictGroup {
   existing: BarcodeConflictVariant[];
 }
 
-function variantDisplayName(v: FormVariant, index: number): string {
-  return v.variant_name.trim() || `Variant ${index + 1}`;
+type TranslateFn = (key: string, params?: Record<string, string | number>) => string;
+
+function variantDisplayName(v: FormVariant, index: number, t: TranslateFn): string {
+  return v.variant_name.trim() || t('addProduct.variantLabel', { n: index + 1 });
 }
 
-function getDuplicateBarcodeGroups(variants: FormVariant[]): Array<{ barcode: string; indices: number[]; names: string[] }> {
+function getDuplicateBarcodeGroups(variants: FormVariant[], t: TranslateFn): Array<{ barcode: string; indices: number[]; names: string[] }> {
   const groups = new Map<string, number[]>();
   variants.forEach((variant, index) => {
     const barcode = variant.barcode?.trim();
@@ -72,7 +76,7 @@ function getDuplicateBarcodeGroups(variants: FormVariant[]): Array<{ barcode: st
     .map(([barcode, indices]) => ({
       barcode,
       indices,
-      names: indices.map(index => variantDisplayName(variants[index], index)),
+      names: indices.map(index => variantDisplayName(variants[index], index, t)),
     }));
 }
 
@@ -82,6 +86,18 @@ function ean13CheckDigit(digits: number[]): string {
     sum += digits[i] * (i % 2 === 0 ? 1 : 3);
   }
   return String((10 - (sum % 10)) % 10);
+}
+
+/** SKU for a new variant: HPS-<name abbreviations>-<random 4 digits>. Pure. */
+function generateSkuValue(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  const abbr = words.map(w => {
+    const clean = w.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (clean.length <= 3) return clean;
+    return clean.slice(0, 2) + clean.slice(-1);
+  }).join('-');
+  const num = String(Math.floor(Math.random() * 9000) + 1000);
+  return `HPS-${abbr || 'ITEM'}-${num}`;
 }
 
 function generateBarcodeValue(): string {
@@ -128,7 +144,7 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
   const [createdProductId, setCreatedProductId] = useState<number | null>(null);
   const [createdVariantBarcode, setCreatedVariantBarcode] = useState<string | null>(null);
   const [catalogBarcodeConflicts, setCatalogBarcodeConflicts] = useState<CatalogBarcodeConflictGroup[]>([]);
-  const duplicateBarcodeGroups = getDuplicateBarcodeGroups(variants);
+  const duplicateBarcodeGroups = getDuplicateBarcodeGroups(variants, t);
   const duplicateBarcodeIndices = new Set(duplicateBarcodeGroups.flatMap(group => group.indices));
   const catalogBarcodeConflictIndices = new Set(catalogBarcodeConflicts.flatMap(group => group.current.map(item => item.index)));
   const duplicateBarcodeByIndex = new Map<number, { barcode: string; names: string[] }>();
@@ -170,18 +186,8 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
       current: variants
         .map((variant, index) => ({ variant, index }))
         .filter(({ variant }) => variant.barcode?.trim() === barcode)
-        .map(({ variant, index }) => ({ index, name: variantDisplayName(variant, index) })),
+        .map(({ variant, index }) => ({ index, name: variantDisplayName(variant, index, t) })),
     })).filter(group => group.current.length > 0 && group.existing.length > 0);
-  }
-  function generateSkuValue(name: string): string {
-    const words = name.trim().split(/\s+/).filter(Boolean);
-    const abbr = words.map(w => {
-      const clean = w.toUpperCase().replace(/[^A-Z0-9]/g, '');
-      if (clean.length <= 3) return clean;
-      return clean.slice(0, 2) + clean.slice(-1);
-    }).join('-');
-    const num = String(Math.floor(Math.random() * 9000) + 1000);
-    return `HPS-${abbr || 'ITEM'}-${num}`;
   }
 
   const { data: categories } = useQuery({
@@ -195,26 +201,28 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
     queryFn: () => invoke<ProductVariant[]>('get_product_variants', { productId: editProduct!.id }),
     enabled: isEditing && !!editProduct,
   });
-  useEffect(() => {
-    if (isEditing && existingVariants) {
-      // Existing variants start collapsed — only the one the merchant opens
-      // expands, keeping a long edit list scannable.
-      setVariants(existingVariants.map(v => ({
-        id: v.id,
-        variant_name: v.variant_name,
-        condition_note: v.condition_note ?? undefined,
-        quantity: v.quantity,
-        cost_price: v.cost_price,
-        selling_price: v.selling_price,
-        barcode: v.barcode ?? undefined,
-        sku: v.sku ?? undefined,
-        image_path: v.image_path ?? undefined,
-        low_stock_threshold: v.low_stock_threshold,
-        _id: v.id,
-        _expanded: false,
-      })));
-    }
-  }, [existingVariants, isEditing]);
+  // Load each fetched set of existing variants into the form once. This is done
+  // during render (React's "adjust state when a prop changes" pattern), not in an effect.
+  const [syncedVariants, setSyncedVariants] = useState<ProductVariant[] | undefined>(undefined);
+  if (isEditing && existingVariants && existingVariants !== syncedVariants) {
+    setSyncedVariants(existingVariants);
+    // Existing variants start collapsed — only the one the merchant opens
+    // expands, keeping a long edit list scannable.
+    setVariants(existingVariants.map(v => ({
+      id: v.id,
+      variant_name: v.variant_name,
+      condition_note: v.condition_note ?? undefined,
+      quantity: v.quantity,
+      cost_price: v.cost_price,
+      selling_price: v.selling_price,
+      barcode: v.barcode ?? undefined,
+      sku: v.sku ?? undefined,
+      image_path: v.image_path ?? undefined,
+      low_stock_threshold: v.low_stock_threshold,
+      _id: v.id,
+      _expanded: false,
+    })));
+  }
   // Seed one prefilled variant on create. Done via a ref-guarded effect rather
   // than a lazy initializer because generating its SKU/barcode at module load
   // would run even when editing. The seeded barcode is then checked against the
@@ -230,7 +238,7 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
         setVariants(prev => prev.length > 0 ? [{ ...prev[0], barcode: bc }, ...prev.slice(1)] : prev);
       });
     }
-  }, [isEditing]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isEditing, form.name]);
 
   const createMutation = useMutation({
     mutationFn: (data: CreateProduct) => invoke<Product>('create_product', { data }),
@@ -259,7 +267,7 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
       toast.error(t('addProduct.variantRequired'));
       return;
     }
-    const duplicateGroups = getDuplicateBarcodeGroups(variants);
+    const duplicateGroups = getDuplicateBarcodeGroups(variants, t);
     if (duplicateGroups.length > 0) {
       const duplicateIndices = new Set(duplicateGroups.flatMap(group => group.indices));
       setVariants(prev => prev.map((variant, index) => ({
@@ -269,7 +277,7 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
       const details = duplicateGroups
         .map(group => `${group.barcode}: ${group.names.join(', ')}`)
         .join(' · ');
-      toast.error(`Duplicate barcode found: ${details}`);
+      toast.error(t('addProduct.duplicateBarcodeFound', { details }));
       return;
     }
     const catalogConflicts = await findCatalogBarcodeConflicts();
@@ -280,7 +288,7 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
         _expanded: conflictIndices.has(index) ? true : variant._expanded,
       })));
       setCatalogBarcodeConflicts(catalogConflicts);
-      toast.error('Barcode already used by another product');
+      toast.error(t('addProduct.barcodeUsedByOther'));
       return;
     }
     setCatalogBarcodeConflicts([]);
@@ -290,8 +298,12 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
       description: form.description || null,
       image_path: serializeImages(images),
       // Strip UI-only fields (_expanded, _id) before sending to the backend.
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      variants: variants.map(({ _expanded, _id, ...v }) => v),
+      variants: variants.map((variant): VariantInput => {
+        const payloadVariant: Partial<typeof variant> = { ...variant };
+        delete payloadVariant._expanded;
+        delete payloadVariant._id;
+        return payloadVariant as VariantInput;
+      }),
     };
     try {
       let productId: number | null = null;
@@ -416,26 +428,26 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
   const totalStock = variants.reduce((s, v) => s + (v.quantity ?? 0), 0);
 
   return (
-    <div className="p-8">
-      <div className="flex items-start justify-between mb-8">
-        <div>
-          <div className="flex items-center gap-3 mb-1">
-            <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-card hover:border-border border border-transparent transition-colors">
-              <ArrowLeft size={20} />
-            </button>
-            <h2 className="text-[26px] font-bold text-text-primary leading-tight">{isEditing ? t('addProduct.editTitle') : t('addProduct.title')}</h2>
+    <div className="p-8 animate-fade-up">
+      <div className="flex items-start justify-between gap-4 mb-7">
+        <div className="flex items-start gap-2 min-w-0">
+          <button type="button" onClick={onBack} aria-label={t('common.back')} title={t('common.back')}
+            className="mt-1 -ml-2 p-2 rounded-xl text-text-secondary hover:bg-card hover:text-text-primary transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-navy/30">
+            <ArrowLeft size={18} />
+          </button>
+          <div className="min-w-0">
+            <span className="eyebrow-accent mb-3 flex w-fit">{t('sidebar.groupStock')}</span>
+            <h2 className="page-title">{isEditing ? t('addProduct.editTitle') : t('addProduct.title')}</h2>
+            <p className="page-subtitle">
+              {isEditing ? t('addProduct.editSubtitle') : t('addProduct.newSubtitle')}
+            </p>
           </div>
-          <p className="text-[14px] text-text-secondary ml-11">
-            {isEditing ? t('addProduct.editSubtitle') : t('addProduct.newSubtitle')}
-          </p>
         </div>
-        <div className="flex items-center gap-2.5">
-          <button onClick={onBack}
-            className="px-5 py-2.5 rounded-lg border border-border text-[13px] font-medium text-text-secondary hover:bg-card transition-colors">
+        <div className="flex items-center gap-2.5 shrink-0">
+          <button type="button" onClick={onBack} className="btn-secondary">
             {t('common.cancel')}
           </button>
-          <button onClick={handleSubmit} disabled={!form.name || createMutation.isPending}
-            className="px-6 py-2.5 rounded-lg bg-navy text-white text-[13px] font-medium hover:bg-navy-light disabled:opacity-50 transition-colors">
+          <button type="button" onClick={handleSubmit} disabled={!form.name || createMutation.isPending} className="btn-primary">
             {createMutation.isPending || updateMutation.isPending ? t('addProduct.saving') : (isEditing ? t('addProduct.saveChanges') : t('addProduct.saveProduct'))}
           </button>
         </div>
@@ -445,7 +457,7 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
         <section className="card p-6">
           <div className="flex items-center gap-2 mb-5">
             <Info size={16} className="text-text-muted" />
-            <h3 className="text-[15px] font-bold text-text-primary">{t('addProduct.basicInformation')}</h3>
+            <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-text-primary">{t('addProduct.basicInformation')}</h3>
           </div>
           <div className="space-y-4">
             <Field label={t('addProduct.productNameLabel')} required>
@@ -475,17 +487,17 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
         <section className="card p-6">
           <div className="flex items-center gap-2 mb-3">
             <Layers size={16} className="text-text-muted" />
-            <h3 className="text-[15px] font-bold text-text-primary">{t('addProduct.productVariants')}</h3>
+            <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-text-primary">{t('addProduct.productVariants')}</h3>
           </div>
-          <p className="text-[11.5px] text-text-muted mb-4">{t('addProduct.variantsDesc')}</p>
+          <p className="text-[13px] text-text-muted mb-4">{t('addProduct.variantsDesc')}</p>
           {duplicateBarcodeGroups.length > 0 && (
-            <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
-              <p className="text-[12px] font-semibold text-accent-red">Duplicate barcode detected</p>
+            <div className="mb-4 rounded-xl border border-accent-red/30 bg-accent-red/10 px-4 py-3">
+              <p className="text-[13px] font-semibold text-accent-red">{t('addProduct.duplicateBarcodeDetected')}</p>
               <div className="mt-1.5 space-y-1">
                 {duplicateBarcodeGroups.map(group => (
-                  <p key={group.barcode} className="text-[11.5px] text-accent-red/90">
+                  <p key={group.barcode} className="text-[13px] text-accent-red/90">
                     <span className="font-mono font-semibold">{group.barcode}</span>
-                    {' '}is used by {group.names.join(' and ')}
+                    {' '}{t('addProduct.barcodeUsedBy', { names: group.names.join(t('addProduct.listAnd')) })}
                   </p>
                 ))}
               </div>
@@ -518,43 +530,43 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
                 }}
                 duplicateBarcode={duplicateBarcodeIndices.has(i) || catalogBarcodeConflictIndices.has(i)}
                 duplicateBarcodeMessage={duplicateBarcodeByIndex.get(i)?.names
-                  .filter(name => name !== variantDisplayName(v, i))
-                  .join(' and ') || catalogConflictByIndex.get(i)?.existing
+                  .filter(name => name !== variantDisplayName(v, i, t))
+                  .join(t('addProduct.listAnd')) || catalogConflictByIndex.get(i)?.existing
                     .map(existing => `${existing.product_name} / ${existing.variant_name}`)
-                    .join(' and ')}
+                    .join(t('addProduct.listAnd'))}
               />
             ))}
             <button onClick={addVariant}
-              className="w-full py-2.5 rounded-xl border border-dashed border-border text-[12px] font-medium text-text-secondary hover:bg-card hover:border-navy/30 transition-colors flex items-center justify-center gap-1.5">
+              className="w-full py-2.5 rounded-xl border border-dashed border-border text-[13px] font-medium text-text-secondary hover:bg-card hover:border-navy/30 hover:text-navy transition-colors flex items-center justify-center gap-1.5">
               <Plus size={14} /> {t('addProduct.addNewVariant')}
             </button>
           </div>
 
-          <div className="mt-4 px-4 py-2.5 rounded-lg bg-surface border border-border-light text-[11.5px] text-text-muted flex items-center justify-between">
+          <div className="mt-4 px-4 py-2.5 rounded-xl bg-surface border border-border-light text-[13px] text-text-muted flex items-center justify-between">
             <span>{t('addProduct.totalStockLabel')}</span>
-            <span className="font-bold text-text-primary">{t('addProduct.unitsCount', { count: totalStock })}</span>
+            <span className="font-semibold text-text-primary tabular-nums">{t('addProduct.unitsCount', { count: totalStock })}</span>
           </div>
         </section>
 
         <section className="card p-6">
           <div className="flex items-center gap-2 mb-4">
             <ImagePlus size={16} className="text-text-muted" />
-            <h3 className="text-[15px] font-bold text-text-primary">{t('addProduct.productImages')}</h3>
+            <h3 className="text-[15px] font-semibold tracking-[-0.01em] text-text-primary">{t('addProduct.productImages')}</h3>
             {images.length > 0 && (
-              <span className="text-[11px] text-text-muted ml-auto">{t('addProduct.imagesCount', { count: images.length, plural: images.length > 1 ? 's' : '' })}</span>
+              <span className="text-[13px] text-text-muted ml-auto">{t('addProduct.imagesCount', { count: images.length, plural: images.length > 1 ? 's' : '' })}</span>
             )}
           </div>
           <div
             onClick={handleImageSelect}
             onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
             onDrop={handleDrop}
-            className="border-2 border-dashed border-border rounded-xl p-5 flex flex-col items-center justify-center cursor-pointer hover:border-navy/30 hover:bg-navy/5 transition-colors mb-4"
+            className="border-2 border-dashed border-border rounded-2xl p-5 flex flex-col items-center justify-center cursor-pointer hover:border-navy/30 hover:bg-navy/5 transition-colors mb-4"
           >
             <Cloud size={24} className="text-text-muted mb-1.5" />
             <p className="text-[13px] font-medium text-text-primary">{t('addProduct.dragDropImages')}</p>
-            <p className="text-[11.5px] text-text-muted mt-0.5">{t('addProduct.imagesFormat')}</p>
+            <p className="text-[13px] text-text-muted mt-0.5">{t('addProduct.imagesFormat')}</p>
             <button type="button" onClick={(e) => { e.stopPropagation(); handleImageSelect(); }}
-              className="mt-3 px-4 py-1.5 rounded-lg border border-border text-[12px] font-medium text-text-secondary hover:bg-card transition-colors">
+              className="mt-3 px-4 py-1.5 rounded-lg border border-border text-[13px] font-medium text-text-secondary hover:bg-card transition-colors">
               {t('addProduct.browseFiles')}
             </button>
           </div>
@@ -562,33 +574,33 @@ export default function AddProduct({ onBack, editProduct }: AddProductProps) {
             <div className="flex flex-wrap gap-3">
               {images.map((img, idx) => (
                 <div key={idx} className={`relative group w-20 h-20 rounded-lg overflow-hidden border-2 transition-colors ${idx === 0 ? 'border-navy' : 'border-border'}`}>
-                  <img src={convertFileSrc(img)} alt={`Product ${idx + 1}`} className="w-full h-full object-cover" />
+                  <img src={convertFileSrc(img)} alt={t('addProduct.imageAlt', { n: idx + 1 })} className="w-full h-full object-cover" />
                   {idx === 0 && (
-                    <div className="absolute top-0 left-0 px-1.5 py-0.5 bg-navy text-white text-[9px] font-bold rounded-br">
+                    <div className="absolute top-0 left-0 px-1.5 py-0.5 bg-navy text-white text-[13px] font-semibold rounded-br">
                       <Star size={8} className="inline mr-0.5" />{t('addProduct.cover')}
                     </div>
                   )}
                   <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
                     {idx > 0 && (
-                      <button onClick={(e) => { e.stopPropagation(); moveImage(idx, -1); }} className="p-0.5 rounded bg-card/80 text-text-primary hover:bg-card">
+                      <button type="button" aria-label={t('addProduct.moveImageUp')} title={t('addProduct.moveImageUp')} onClick={(e) => { e.stopPropagation(); moveImage(idx, -1); }} className="p-0.5 rounded bg-card/90 text-text-primary hover:bg-card transition-colors">
                         <ChevronDown size={12} className="rotate-90" />
                       </button>
                     )}
                     {idx < images.length - 1 && (
-                      <button onClick={(e) => { e.stopPropagation(); moveImage(idx, 1); }} className="p-0.5 rounded bg-card/80 text-text-primary hover:bg-card">
+                      <button type="button" aria-label={t('addProduct.moveImageDown')} title={t('addProduct.moveImageDown')} onClick={(e) => { e.stopPropagation(); moveImage(idx, 1); }} className="p-0.5 rounded bg-card/90 text-text-primary hover:bg-card transition-colors">
                         <ChevronUp size={12} className="rotate-90" />
                       </button>
                     )}
-                    <button onClick={(e) => { e.stopPropagation(); removeImage(idx); }} className="p-0.5 rounded bg-red-500 text-white hover:bg-red-600">
+                    <button type="button" aria-label={t('common.remove')} title={t('common.remove')} onClick={(e) => { e.stopPropagation(); removeImage(idx); }} className="p-0.5 rounded bg-accent-red text-white hover:brightness-110 transition-[filter]">
                       <X size={12} />
                     </button>
                   </div>
                 </div>
               ))}
-              <div onClick={handleImageSelect}
-                className="w-20 h-20 rounded-lg border-2 border-dashed border-border flex items-center justify-center cursor-pointer hover:border-navy/30 transition-colors">
+              <button type="button" onClick={handleImageSelect} aria-label={t('addProduct.browseFiles')}
+                className="w-20 h-20 rounded-lg border-2 border-dashed border-border flex items-center justify-center cursor-pointer hover:border-navy/30 hover:bg-navy/5 transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-navy/30">
                 <Plus size={18} className="text-text-muted" />
-              </div>
+              </button>
             </div>
           )}
         </section>
@@ -664,7 +676,9 @@ function VariantCard({
           width: 1.5, height: 36, displayValue: true,
           fontSize: 11, margin: 2, background: 'transparent', lineColor: 'currentColor',
         });
-      } catch { }
+      } catch {
+        // JsBarcode rejects some values; the preview is then simply left empty
+      }
     }
   }, [variant.barcode]);
 
@@ -672,10 +686,12 @@ function VariantCard({
   const profitPct = variant.selling_price > 0 ? ((profit / variant.selling_price) * 100).toFixed(0) : '0';
 
   return (
-    <div className={`rounded-xl border overflow-hidden ${duplicateBarcode ? 'border-accent-red ring-2 ring-red-500/10' : 'border-border'}`}>
+    <div className={`rounded-xl border overflow-hidden ${duplicateBarcode ? 'border-accent-red ring-2 ring-accent-red/10' : 'border-border'}`}>
       <button
+        type="button"
         onClick={onToggle}
-        className={`w-full flex items-center gap-2 px-3.5 py-2.5 hover:bg-card transition-colors text-left ${duplicateBarcode ? 'bg-red-50' : 'bg-surface'}`}
+        aria-expanded={variant._expanded !== false}
+        className={`w-full flex items-center gap-2 px-3.5 py-2.5 hover:bg-card transition-colors text-left focus-visible:outline-none focus-visible:ring-inset focus-visible:ring-2 focus-visible:ring-navy/30 ${duplicateBarcode ? 'bg-accent-red/10' : 'bg-surface'}`}
       >
         {variant.image_path ? (
           <img src={convertFileSrc(variant.image_path)} alt="" className="w-7 h-7 rounded object-cover border border-border flex-shrink-0" />
@@ -687,7 +703,7 @@ function VariantCard({
         <span className="text-[13px] font-semibold text-text-primary truncate flex-1">
           {variant.variant_name || t('addProduct.variantLabel', { n: index + 1 })}
         </span>
-        <span className="text-[11px] text-text-muted">{t('addProduct.unitsCount', { count: variant.quantity ?? 0 })}</span>
+        <span className="text-[13px] text-text-muted">{t('addProduct.unitsCount', { count: variant.quantity ?? 0 })}</span>
         {variant._expanded ? <ChevronUp size={14} className="text-text-muted" /> : <ChevronDown size={14} className="text-text-muted" />}
       </button>
 
@@ -696,11 +712,11 @@ function VariantCard({
           <div className="grid grid-cols-2 gap-2.5">
             <Field label={t('addProduct.variantNameLabel')} required>
               <input value={variant.variant_name} onChange={(e) => onChange({ variant_name: e.target.value })}
-                placeholder={t('addProduct.variantNamePlaceholder')} className="form-input !py-1.5 !text-[12px]" />
+                placeholder={t('addProduct.variantNamePlaceholder')} className="form-input !py-1.5 !text-[13px]" />
             </Field>
             <Field label={t('addProduct.conditionNoteLabel')}>
               <input value={variant.condition_note ?? ''} onChange={(e) => onChange({ condition_note: e.target.value || undefined })}
-                placeholder={t('addProduct.conditionPlaceholder')} className="form-input !py-1.5 !text-[12px]" />
+                placeholder={t('addProduct.conditionPlaceholder')} className="form-input !py-1.5 !text-[13px]" />
             </Field>
           </div>
 
@@ -708,9 +724,9 @@ function VariantCard({
           <Field label={t('addProduct.variantSku')}>
             <div className="flex items-center gap-2">
               <input value={variant.sku ?? ''} onChange={(e) => onChange({ sku: e.target.value || undefined })}
-                placeholder="HPS-..." className="form-input !py-1.5 !text-[12px] font-mono flex-1" />
+                placeholder="HPS-..." className="form-input !py-1.5 !text-[13px] font-mono flex-1" />
               <button type="button" onClick={onGenSku}
-                className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-border text-[11px] font-medium text-text-secondary hover:bg-surface transition-colors flex-shrink-0">
+                className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-border text-[13px] font-medium text-text-secondary hover:bg-surface transition-colors flex-shrink-0">
                 <RefreshCw size={12} /> {t('barcode.generate')}
               </button>
             </div>
@@ -721,15 +737,15 @@ function VariantCard({
             <div className="flex items-center gap-2">
               <input value={variant.barcode ?? ''} onChange={(e) => onChange({ barcode: e.target.value || undefined })}
                 placeholder="EAN-13"
-                className={`form-input !py-1.5 !text-[12px] font-mono flex-1 ${duplicateBarcode ? '!border-accent-red !bg-red-50 focus:!ring-red-500/15 focus:!border-accent-red' : ''}`} />
+                className={`form-input !py-1.5 !text-[13px] font-mono flex-1 ${duplicateBarcode ? '!border-accent-red !bg-accent-red/10 focus:!ring-accent-red/15 focus:!border-accent-red' : ''}`} />
               <button type="button" onClick={onGenBarcode}
-                className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-border text-[11px] font-medium text-text-secondary hover:bg-surface transition-colors flex-shrink-0">
+                className="flex items-center gap-1 px-2 py-1.5 rounded-lg border border-border text-[13px] font-medium text-text-secondary hover:bg-surface transition-colors flex-shrink-0">
                 <RefreshCw size={12} /> {t('barcode.generate')}
               </button>
             </div>
             {duplicateBarcode && (
-              <p className="mt-1.5 text-[11px] font-medium text-accent-red">
-                Same barcode as {duplicateBarcodeMessage}
+              <p className="mt-1.5 text-[13px] font-medium text-accent-red">
+                {t('addProduct.sameBarcodeAs', { names: duplicateBarcodeMessage ?? '' })}
               </p>
             )}
             {variant.barcode && (
@@ -742,37 +758,37 @@ function VariantCard({
           <div className="grid grid-cols-3 gap-2.5">
             <Field label={t('addProduct.stockQtyLabel')}>
               <input type="number" value={variant.quantity ?? 0} onChange={(e) => onChange({ quantity: parseInt(e.target.value) || 0 })}
-                placeholder="0" className="form-input !py-1.5 !text-[12px]" />
+                placeholder="0" className="form-input !py-1.5 !text-[13px]" />
             </Field>
             <Field label={t('addProduct.costDaLabel')}>
               <input type="number" step="0.01" value={variant.cost_price} onChange={(e) => onChange({ cost_price: parseFloat(e.target.value) || 0 })}
-                placeholder="0.00" className="form-input !py-1.5 !text-[12px]" />
+                placeholder="0.00" className="form-input !py-1.5 !text-[13px]" />
             </Field>
             <Field label={t('addProduct.sellDaLabel')}>
               <input type="number" step="0.01" value={variant.selling_price} onChange={(e) => onChange({ selling_price: parseFloat(e.target.value) || 0 })}
-                placeholder="0.00" className="form-input !py-1.5 !text-[12px]" />
+                placeholder="0.00" className="form-input !py-1.5 !text-[13px]" />
             </Field>
           </div>
 
           {/* Profit readout (threshold is no longer surfaced in the UI). */}
-          <div className="w-full px-2.5 py-1.5 rounded-lg bg-surface border border-border-light text-[11px] text-text-muted">
-            {t('addProduct.profitPerUnit')} <span className="font-bold text-accent-green">{profit.toFixed(0)} DA</span> <span className="text-text-muted">({profitPct}%)</span>
+          <div className="w-full px-2.5 py-1.5 rounded-lg bg-surface border border-border-light text-[13px] text-text-muted">
+            {t('addProduct.profitPerUnit')} <span className="font-semibold text-accent-green tabular-nums">{profit.toFixed(0)}&lrm; DA</span> <span className="text-text-muted">({profitPct}%)</span>
           </div>
 
           {/* Variant image */}
           <div>
-            <label className="block text-[11px] font-semibold text-text-muted tracking-[0.06em] uppercase mb-1.5">{t('addProduct.variantImage')}</label>
+            <label className="block text-[13px] font-medium text-text-secondary mb-1.5">{t('addProduct.variantImage')}</label>
             {variant.image_path ? (
               <div className="flex items-center gap-2">
                 <img src={convertFileSrc(variant.image_path)} alt="" className="w-14 h-14 rounded-lg object-cover border border-border" />
                 <button onClick={() => onChange({ image_path: undefined })}
-                  className="text-[11px] text-accent-red hover:underline">{t('common.remove')}</button>
+                  className="text-[13px] text-accent-red hover:underline">{t('common.remove')}</button>
                 <button onClick={onImageSelect}
-                  className="text-[11px] text-navy hover:underline">{t('addProduct.change')}</button>
+                  className="text-[13px] text-navy hover:underline">{t('addProduct.change')}</button>
               </div>
             ) : (
               <button onClick={onImageSelect}
-                className="w-full py-2.5 rounded-lg border border-dashed border-border text-[11px] text-text-muted hover:border-navy/30 hover:bg-navy/5 transition-colors flex items-center justify-center gap-1.5">
+                className="w-full py-2.5 rounded-lg border border-dashed border-border text-[13px] text-text-muted hover:border-navy/30 hover:bg-navy/5 transition-colors flex items-center justify-center gap-1.5">
                 <ImagePlus size={13} /> {t('addProduct.addImage')}
               </button>
             )}
@@ -780,7 +796,7 @@ function VariantCard({
 
           {canRemove && (
             <button onClick={onRemove}
-              className="flex items-center gap-1 text-[11.5px] text-accent-red hover:underline">
+              className="flex items-center gap-1 text-[13px] text-accent-red hover:underline">
               <Trash2 size={12} /> {t('addProduct.removeVariant')}
             </button>
           )}
@@ -799,48 +815,50 @@ function BarcodeConflictModal({
   onClose: () => void;
   onRegenerate: (index: number) => void;
 }) {
+  const { t } = useI18n();
   return (
     <div className="fixed inset-0 z-[220] flex items-center justify-center p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" />
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
       <div
-        className="relative w-full max-w-3xl max-h-[86vh] overflow-hidden rounded-2xl bg-card shadow-2xl"
+        className="relative w-full max-w-3xl max-h-[86vh] overflow-hidden rounded-2xl bg-card border border-border shadow-raised"
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+        <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-border-light">
           <div>
-            <h3 className="text-[16px] font-bold text-text-primary">Barcode conflict</h3>
-            <p className="text-[12px] text-text-secondary mt-0.5">
-              These barcodes are already used by another product. Regenerate one side before saving.
+            <h3 className="text-[17px] font-semibold tracking-[-0.01em] text-text-primary">{t('addProduct.barcodeConflict')}</h3>
+            <p className="text-[13px] text-text-secondary mt-0.5">
+              {t('addProduct.barcodeConflictDesc')}
             </p>
           </div>
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-surface transition-colors">
+          <button type="button" onClick={onClose} aria-label={t('common.close')}
+            className="p-1.5 rounded-lg text-text-muted hover:bg-surface hover:text-text-primary transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-navy/30">
             <X size={18} />
           </button>
         </div>
 
         <div className="p-6 space-y-4 overflow-y-auto max-h-[calc(86vh-76px)]">
           {groups.map(group => (
-            <div key={group.barcode} className="rounded-xl border border-red-200 bg-red-50/60 overflow-hidden">
-              <div className="px-4 py-3 border-b border-red-200/80">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-accent-red">Duplicate barcode</p>
-                <p className="mt-0.5 font-mono text-[14px] font-bold text-text-primary">{group.barcode}</p>
+            <div key={group.barcode} className="rounded-xl border border-accent-red/30 bg-accent-red/5 overflow-hidden">
+              <div className="px-4 py-3 border-b border-accent-red/20">
+                <p className="text-[13px] font-semibold uppercase tracking-[0.06em] text-accent-red">{t('addProduct.duplicateBarcode')}</p>
+                <p className="mt-0.5 font-mono text-[14px] font-semibold text-text-primary">{group.barcode}</p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-0">
-                <div className="p-4 border-b md:border-b-0 md:border-r border-red-200/80">
-                  <h4 className="text-[12px] font-semibold text-text-primary mb-2">Current form</h4>
+                <div className="p-4 border-b md:border-b-0 md:border-r border-accent-red/20">
+                  <h4 className="text-[13px] font-semibold text-text-primary mb-2">{t('addProduct.currentForm')}</h4>
                   <div className="space-y-2">
                     {group.current.map(current => (
                       <div key={current.index} className="rounded-lg border border-border bg-card px-3 py-2">
                         <p className="text-[13px] font-medium text-text-primary">{current.name}</p>
-                        <p className="text-[11px] text-text-muted mt-0.5">Variant #{current.index + 1}</p>
+                        <p className="text-[13px] text-text-muted mt-0.5">{t('addProduct.variantNumber', { n: current.index + 1 })}</p>
                         <button
                           type="button"
                           onClick={() => onRegenerate(current.index)}
-                          className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[11.5px] font-medium text-text-secondary hover:bg-surface transition-colors"
+                          className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-[13px] font-medium text-text-secondary hover:bg-surface transition-colors"
                         >
                           <RefreshCw size={12} />
-                          Regenerate barcode
+                          {t('addProduct.regenerateBarcode')}
                         </button>
                       </div>
                     ))}
@@ -848,16 +866,16 @@ function BarcodeConflictModal({
                 </div>
 
                 <div className="p-4">
-                  <h4 className="text-[12px] font-semibold text-text-primary mb-2">Already in catalog</h4>
+                  <h4 className="text-[13px] font-semibold text-text-primary mb-2">{t('addProduct.alreadyInCatalog')}</h4>
                   <div className="space-y-2">
                     {group.existing.map(existing => (
                       <div key={existing.variant_id} className="rounded-lg border border-border bg-card px-3 py-2">
                         <p className="text-[13px] font-medium text-text-primary">{existing.product_name}</p>
-                        <p className="text-[11.5px] text-text-secondary mt-0.5">
-                          {existing.variant_name} · {existing.category_name ?? 'Uncategorized'}
+                        <p className="text-[13px] text-text-secondary mt-0.5">
+                          {existing.variant_name} · {existing.category_name ?? t('checkout.uncategorized')}
                         </p>
-                        <p className="text-[11px] text-text-muted mt-0.5">
-                          {existing.quantity} stock · {existing.selling_price.toFixed(2)} DA
+                        <p className="text-[13px] text-text-muted mt-0.5">
+                          {t('products.variantStockPrice', { count: existing.quantity, price: existing.selling_price.toFixed(2) })}
                           {existing.sku ? ` · ${existing.sku}` : ''}
                         </p>
                       </div>
@@ -876,7 +894,7 @@ function BarcodeConflictModal({
 function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
   return (
     <div>
-      <label className="block text-[11px] font-semibold text-text-muted tracking-[0.06em] uppercase mb-1.5">
+      <label className="block text-[13px] font-medium text-text-secondary mb-1.5">
         {label}{required && <span className="text-accent-red ml-0.5">*</span>}
       </label>
       {children}

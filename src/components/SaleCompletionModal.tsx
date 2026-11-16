@@ -45,6 +45,12 @@ export default function SaleCompletionModal({
     ).slice(0, 8);
   }, [customerSearch, customers]);
   const selectedCustomer = customers?.find(c => c.id === customerId);
+  const itemCount = cart.reduce((s, i) => s + i.quantity, 0);
+  const paymentLabel = paymentMethod === 'card'
+    ? t('checkout.card')
+    : paymentMethod === 'cash'
+      ? t('checkout.cash')
+      : paymentMethod;
   const handleConfirm = () => {
     const warrantyEntries: WarrantyEntry[] = [];
     cart.forEach((item, idx) => {
@@ -65,70 +71,83 @@ export default function SaleCompletionModal({
     onConfirm(customerId, notes);
   };
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100]" onClick={onCancel}>
+    <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-[100] p-4" onClick={onCancel}>
       <div
-        className="bg-card rounded-2xl w-full max-w-[540px] shadow-2xl overflow-hidden max-h-[85vh] flex flex-col"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sale-completion-title"
+        className="bg-card rounded-2xl w-full max-w-[540px] shadow-raised overflow-hidden max-h-[85vh] flex flex-col animate-fade-up"
         onClick={e => e.stopPropagation()}
       >
-        {}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-          <div>
-            <h3 className="text-[17px] font-bold text-text-primary">{t('checkout.completeSale')}</h3>
-            <p className="text-[12px] text-text-muted mt-0.5">{t('checkout.completeSaleDesc')}</p>
+        {/* Header */}
+        <div className="flex items-start justify-between gap-4 px-6 pt-5 pb-4 border-b border-border-light">
+          <div className="min-w-0">
+            <h3 id="sale-completion-title" className="text-[17px] font-semibold text-text-primary">{t('checkout.completeSale')}</h3>
+            <p className="text-[13px] text-text-secondary mt-0.5">{t('checkout.completeSaleDesc')}</p>
           </div>
-          <button onClick={onCancel} className="p-1.5 rounded-lg hover:bg-surface transition-colors text-text-muted">
-            <X size={18} />
+          <button
+            type="button"
+            onClick={onCancel}
+            aria-label={t('common.close')}
+            className="p-1.5 -mr-1 -mt-0.5 rounded-lg text-text-muted hover:bg-surface hover:text-text-primary transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-navy/30"
+          >
+            <X size={16} />
           </button>
         </div>
-        {}
+
+        {/* Body */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
-          {}
-          <div>
+          {/* Customer */}
+          <section>
             <div className="flex items-center gap-2 mb-3">
               <User size={14} className="text-text-muted" />
               <h4 className="text-[13px] font-semibold text-text-primary">{t('checkout.linkCustomer')}</h4>
-              <span className="text-[10px] text-text-muted ml-auto">{t('checkout.optional')}</span>
+              <span className="text-[13px] text-text-muted ml-auto">{t('checkout.optional')}</span>
             </div>
             {selectedCustomer ? (
-              <div className="flex items-center gap-3 p-3 rounded-xl bg-surface border border-border">
-                <div className="w-8 h-8 rounded-full bg-navy flex items-center justify-center flex-shrink-0">
-                  <span className="text-white text-[12px] font-bold">{selectedCustomer.name.charAt(0)}</span>
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-surface">
+                <div className="w-9 h-9 rounded-full bg-navy flex items-center justify-center flex-shrink-0">
+                  <span className="text-white text-[13px] font-semibold">{selectedCustomer.name.charAt(0)}</span>
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-[13px] font-semibold text-text-primary truncate">{selectedCustomer.name}</p>
-                  {selectedCustomer.phone && <p className="text-[11px] text-text-muted">{selectedCustomer.phone}</p>}
+                  {selectedCustomer.phone && <p className="text-[13px] text-text-muted tabular-nums">{selectedCustomer.phone}</p>}
                 </div>
                 <button
+                  type="button"
                   onClick={() => setCustomerId(null)}
-                  className="p-1 rounded-lg hover:bg-card text-text-muted transition-colors"
+                  aria-label={t('common.remove')}
+                  className="p-1.5 rounded-lg text-text-muted hover:bg-card hover:text-text-primary transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-navy/30"
                 >
                   <X size={14} />
                 </button>
               </div>
             ) : (
               <div className="relative">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+                <Search size={14} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
                 <input
                   value={customerSearch}
+                  aria-label={t('checkout.searchCustomer')}
                   onChange={e => { setCustomerSearch(e.target.value); setShowCustomerDropdown(true); }}
                   onFocus={() => setShowCustomerDropdown(true)}
                   placeholder={t('checkout.searchCustomer')}
-                  className="w-full pl-9 pr-4 py-2.5 rounded-xl border border-border bg-surface text-[13px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-2 focus:ring-navy/15 focus:border-navy/30 transition-all"
+                  className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-border bg-surface text-[13px] text-text-primary placeholder:text-text-muted transition-[border-color,box-shadow] duration-150 focus:outline-none focus:ring-[3px] focus:ring-navy/20 focus:border-navy"
                 />
                 {showCustomerDropdown && customerSearch && filteredCustomers.length > 0 && (
-                  <div className="absolute top-full mt-1 left-0 right-0 bg-card rounded-xl border border-border shadow-lg z-20 max-h-48 overflow-y-auto">
+                  <div className="absolute top-full mt-1.5 left-0 right-0 bg-card rounded-xl border border-border shadow-raised z-20 max-h-56 overflow-y-auto py-1 animate-fade-up">
                     {filteredCustomers.map(c => (
                       <button
+                        type="button"
                         key={c.id}
                         onClick={() => { setCustomerId(c.id); setCustomerSearch(''); setShowCustomerDropdown(false); }}
-                        className="w-full text-left flex items-center gap-3 px-4 py-2.5 hover:bg-surface transition-colors"
+                        className="w-full text-left flex items-center gap-3 px-3.5 py-2.5 hover:bg-surface transition-colors"
                       >
                         <div className="w-7 h-7 rounded-full bg-navy/10 flex items-center justify-center flex-shrink-0">
-                          <span className="text-navy text-[11px] font-bold">{c.name.charAt(0)}</span>
+                          <span className="text-navy text-[13px] font-semibold">{c.name.charAt(0)}</span>
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-[12.5px] font-medium text-text-primary truncate">{c.name}</p>
-                          {c.phone && <p className="text-[10.5px] text-text-muted">{c.phone}</p>}
+                          <p className="text-[13px] font-medium text-text-primary truncate">{c.name}</p>
+                          {c.phone && <p className="text-[13px] text-text-muted tabular-nums">{c.phone}</p>}
                         </div>
                       </button>
                     ))}
@@ -136,13 +155,14 @@ export default function SaleCompletionModal({
                 )}
               </div>
             )}
-          </div>
-          {}
-          <div>
+          </section>
+
+          {/* Warranty */}
+          <section>
             <div className="flex items-center gap-2 mb-3">
               <Shield size={14} className="text-text-muted" />
               <h4 className="text-[13px] font-semibold text-text-primary">{t('checkout.warrantyTitle')}</h4>
-              <span className="text-[10px] text-text-muted ml-auto">{t('checkout.optional')}</span>
+              <span className="text-[13px] text-text-muted ml-auto">{t('checkout.optional')}</span>
             </div>
             <div className="space-y-2">
               {cart.map((item, idx) => {
@@ -150,57 +170,58 @@ export default function SaleCompletionModal({
                   ? `${item.product.name} (${item.variant.variant_name})`
                   : item.product.name;
                 return (
-                  <div key={idx} className="flex items-center gap-3 p-3 rounded-xl bg-surface border border-border">
+                  <div key={idx} className="flex items-center gap-3 p-3 rounded-xl bg-surface">
                     <div className="w-8 h-8 rounded-lg bg-card flex items-center justify-center flex-shrink-0">
                       <Package size={14} className="text-text-muted" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-[12.5px] font-medium text-text-primary truncate">{name}</p>
-                      <p className="text-[10.5px] text-text-muted">
+                      <p className="text-[13px] font-medium text-text-primary truncate">{name}</p>
+                      <p className="text-[13px] text-text-muted tabular-nums">
                         {t('checkout.qtyPrice', { qty: item.quantity, price: fmt(item.customPrice * item.quantity) })}
                       </p>
                     </div>
-                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <div className="flex items-center gap-2 flex-shrink-0">
                       <input
                         type="number"
                         min="0"
                         max="120"
+                        aria-label={`${name} — ${t('checkout.months')}`}
                         value={warranties[idx] || ''}
                         onChange={e => setWarranties(prev => ({ ...prev, [idx]: e.target.value }))}
                         placeholder="0"
-                        className="w-12 text-center py-1.5 rounded-lg border border-border bg-card text-[12px] text-text-primary focus:outline-none focus:ring-2 focus:ring-navy/15 focus:border-navy/30"
+                        className="w-14 text-center py-1.5 rounded-lg border border-border bg-card text-[13px] tabular-nums text-text-primary placeholder:text-text-muted transition-[border-color,box-shadow] duration-150 focus:outline-none focus:ring-[3px] focus:ring-navy/20 focus:border-navy"
                       />
-                      <span className="text-[10px] text-text-muted w-12">{t('checkout.months')}</span>
+                      <span className="text-[13px] text-text-muted w-12">{t('checkout.months')}</span>
                     </div>
                   </div>
                 );
               })}
             </div>
-          </div>
-          {}
-          <div className="p-4 rounded-xl bg-surface border border-border space-y-2">
-            <div className="flex justify-between text-[13px]">
+          </section>
+
+          {/* Summary */}
+          <div className="p-4 rounded-xl bg-surface space-y-2.5 text-[13px] tabular-nums">
+            <div className="flex justify-between">
               <span className="text-text-secondary">{t('checkout.paymentMethod')}</span>
-              <span className="font-medium text-text-primary capitalize">{paymentMethod}</span>
+              <span className="font-medium text-text-primary">{paymentLabel}</span>
             </div>
-            <div className="flex justify-between text-[13px]">
-              <span className="text-text-secondary">{t('checkout.itemsCount', { count: cart.reduce((s, i) => s + i.quantity, 0) })}</span>
-              <span className="font-medium text-text-primary">{cart.reduce((s, i) => s + i.quantity, 0)}</span>
+            <div className="flex justify-between">
+              <span className="text-text-secondary">{t('common.items')}</span>
+              <span className="font-medium text-text-primary">{itemCount}</span>
             </div>
-            <div className="flex justify-between pt-2 border-t border-border">
-              <span className="text-[15px] font-bold text-text-primary">{t('checkout.totalLabel')}</span>
-              <span className="text-[15px] font-bold text-text-primary">{fmt(total)}</span>
+            <div className="flex justify-between items-baseline pt-2.5 border-t border-border">
+              <span className="text-[15px] font-semibold text-text-primary">{t('checkout.totalLabel')}</span>
+              <span className="text-[18px] font-semibold text-text-primary">{fmt(total)}</span>
             </div>
           </div>
         </div>
-        {}
-        <div className="px-6 py-4 border-t border-border flex items-center gap-3">
-          <button onClick={onCancel}
-            className="flex-1 py-2.5 rounded-xl border border-border text-[13px] font-medium text-text-secondary hover:bg-surface transition-colors">
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-border-light flex items-center gap-3">
+          <button type="button" onClick={onCancel} className="btn-secondary flex-1">
             {t('common.cancel')}
           </button>
-          <button onClick={handleConfirm}
-            className="flex-[2] py-2.5 rounded-xl bg-navy text-white text-[13px] font-semibold hover:bg-navy-light transition-colors flex items-center justify-center gap-2">
+          <button type="button" onClick={handleConfirm} className="btn-primary flex-[2]">
             <Check size={16} />
             {t('checkout.confirmSale', { amount: fmt(total) })}
           </button>

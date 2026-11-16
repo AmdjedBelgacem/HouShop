@@ -7,3 +7,6 @@ pub mod product;
 pub mod reservation;
 pub mod returns;
 pub mod sale;
+pub mod transfer;
+pub mod diagnostics;
+pub mod wipe;

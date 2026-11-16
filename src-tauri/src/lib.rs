@@ -1,6 +1,11 @@
 mod commands;
 mod db;
+mod diagnostics;
 mod models;
+mod session;
+mod transfer;
+mod wipe;
+use std::sync::Arc;
 use tauri::image::Image;
 use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -13,8 +18,34 @@ pub fn run() {
                 db::init_db(&app_handle).await
             })
             .expect("Failed to initialize database");
+
+            let transfers_dir = db::get_transfers_dir(app.handle()).unwrap_or_else(|_| std::path::PathBuf::from("./transfers"));
+            let detector = Arc::new(transfer::DeviceDetector::new());
+            let engine = Arc::new(transfer::TransferEngine::new(detector.clone(), pool.clone(), transfers_dir));
+            let wifi_mgr = Arc::new(tokio::sync::Mutex::new(transfer::WifiServerManager::new()));
+            let diagnostic_state = commands::diagnostics::DiagnosticState::new(pool.clone());
+            let wipe_state = commands::wipe::WipeState::new(pool.clone());
+
             app.manage(pool);
-            println!("Database initialized successfully");
+            app.manage(session::SessionState::default());
+            app.manage(detector.clone());
+            app.manage(engine);
+            app.manage(wifi_mgr);
+            app.manage(diagnostic_state);
+            app.manage(wipe_state);
+
+            // Spawn continuous USB auto-detection task (polls every 2 seconds)
+            let detector_poller = detector.clone();
+            let app_handle_poller = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let mut interval = tokio::time::interval(std::time::Duration::from_millis(2000));
+                loop {
+                    interval.tick().await;
+                    detector_poller.poll_and_emit_events(&app_handle_poller).await;
+                }
+            });
+
+            println!("Database, HouSwitch Transfer, and HouCheck Diagnostic Engines initialized successfully");
             // Apply custom shop logo as the native window / dock / taskbar icon
             // before the webview finishes loading, so the OS chrome matches branding
             // from the first frame (including the loading splash).
@@ -25,9 +56,16 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
+        // Every command passes through the session guard: nothing outside the
+        // public list runs unless a user is signed in.
+        .invoke_handler(session::guard(tauri::generate_handler![
             commands::auth::login,
+            commands::auth::logout,
+            commands::auth::session_user,
             commands::auth::get_current_user,
+            commands::auth::has_users,
+            commands::auth::create_initial_admin,
+            commands::auth::change_password,
             commands::product::get_products,
             commands::product::get_product_by_barcode,
             commands::product::find_barcode_conflicts,
@@ -73,6 +111,42 @@ pub fn run() {
             commands::dashboard::get_inventory_valuation,
             commands::printer::list_printers,
             commands::printer::print_label,
+            commands::transfer::get_phone_tool_status,
+            commands::transfer::list_transfer_devices,
+            commands::transfer::refresh_transfer_devices,
+            commands::transfer::enable_virtual_devices,
+            commands::transfer::scan_device_data,
+            commands::transfer::start_phone_transfer,
+            commands::transfer::pause_phone_transfer,
+            commands::transfer::resume_phone_transfer,
+            commands::transfer::cancel_phone_transfer,
+            commands::transfer::get_transfer_sessions,
+            commands::transfer::get_transfer_logs,
+            commands::transfer::get_transfer_summary,
+            commands::transfer::start_wifi_transfer_server,
+            commands::transfer::stop_wifi_transfer_server,
+            commands::transfer::get_wifi_transfer_server_info,
+            commands::diagnostics::probe_device,
+            commands::diagnostics::start_diagnostic_server,
+            commands::diagnostics::stop_diagnostic_server,
+            commands::diagnostics::get_diagnostic_server_info,
+            commands::diagnostics::update_report_test,
+            commands::diagnostics::batch_update_report_tests,
+            commands::diagnostics::save_device_inspection,
+            commands::diagnostics::list_device_inspections,
+            commands::diagnostics::get_device_inspection,
+            commands::diagnostics::list_virtual_diagnostic_devices,
+            commands::diagnostics::convert_inspection_to_variant,
+            commands::diagnostics::print_inspection_label,
+            commands::diagnostics::send_mobile_diagnostic_command,
+            commands::diagnostics::launch_mobile_companion_on_device,
+            commands::wipe::inspect_device_locks,
+            commands::wipe::launch_account_removal_screen,
+            commands::wipe::execute_wipe,
+            commands::wipe::list_sanitization_records,
+            commands::wipe::get_sanitization_record,
+            commands::wipe::convert_sanitization_to_variant,
+            commands::wipe::print_wipe_label,
             save_image,
             save_app_logo,
             get_app_logo,
@@ -80,7 +154,7 @@ pub fn run() {
             save_app_shop_name,
             get_app_shop_name,
             clear_app_shop_name,
-        ])
+            ]))
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

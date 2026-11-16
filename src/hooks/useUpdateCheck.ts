@@ -22,29 +22,40 @@ function compareVersions(current: string, latest: string): boolean {
   return (lPatch ?? 0) > (cPatch ?? 0);
 }
 
+interface CachedCheck {
+  updateAvailable: boolean;
+  latestVersion: string | null;
+  releaseUrl: string | null;
+  checkedAt: number;
+}
+
+// Returns the cached check only while it is still fresh; null means a new fetch is needed.
+function readFreshCache(): CachedCheck | null {
+  const cached = sessionStorage.getItem(CACHE_KEY);
+  if (!cached) return null;
+  try {
+    const data: CachedCheck = JSON.parse(cached);
+    return Date.now() - data.checkedAt < CHECK_INTERVAL ? data : null;
+  } catch {
+    // Unreadable cache entry: ignore it and fetch fresh data
+    return null;
+  }
+}
+
 export function useUpdateCheck(): UpdateInfo {
-  const [updateAvailable, setUpdateAvailable] = useState(false);
-  const [latestVersion, setLatestVersion] = useState<string | null>(null);
-  const [releaseUrl, setReleaseUrl] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(() => sessionStorage.getItem('houshop_update_dismissed') === '1');
+  // A fresh cached result is applied on the first render, so the effect only fetches when needed
+  const [cached] = useState<CachedCheck | null>(() => (dismissed ? null : readFreshCache()));
+  const [updateAvailable, setUpdateAvailable] = useState(() => cached?.updateAvailable === true);
+  const [latestVersion, setLatestVersion] = useState<string | null>(() =>
+    cached?.updateAvailable ? cached.latestVersion : null,
+  );
+  const [releaseUrl, setReleaseUrl] = useState<string | null>(() =>
+    cached?.updateAvailable ? cached.releaseUrl : null,
+  );
 
   useEffect(() => {
-    if (dismissed) return;
-
-    const cached = sessionStorage.getItem(CACHE_KEY);
-    if (cached) {
-      try {
-        const data = JSON.parse(cached);
-        if (Date.now() - data.checkedAt < CHECK_INTERVAL) {
-          if (data.updateAvailable) {
-            setUpdateAvailable(true);
-            setLatestVersion(data.latestVersion);
-            setReleaseUrl(data.releaseUrl);
-          }
-          return;
-        }
-      } catch { /* ignore */ }
-    }
+    if (dismissed || cached) return;
 
     fetch(API_URL)
       .then(res => {
@@ -69,7 +80,7 @@ export function useUpdateCheck(): UpdateInfo {
         }
       })
       .catch(() => { /* offline or API error, silently ignore */ });
-  }, [dismissed]);
+  }, [dismissed, cached]);
 
   const dismiss = () => {
     setDismissed(true);

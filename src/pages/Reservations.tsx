@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { toast } from 'sonner';
@@ -7,22 +7,29 @@ import type {
   ReservationWithDetails, ReservationStats, Product, ProductVariant,
   CustomerWithStats, CreateReservation, Category,
 } from '../lib/types';
-import CustomSelect from '../components/CustomSelect';
 import ConfirmDialog from '../components/ConfirmDialog';
 import {
   Search, Plus, CalendarCheck, CheckCircle, XCircle, Banknote,
-  Clock, Filter, X, Package, Layers, ArrowLeft,
+  Clock, X, Package, Layers, ArrowLeft,
 } from 'lucide-react';
+import { uiLocale } from '../i18n/locale';
+
 const ITEMS_PER_PAGE = 10;
-const fmt = (n: number) => `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DA`;
+const FOCUS = 'focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-navy/30';
+
+const fmt = (n: number) => `${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\u200E DA`;
+
 function getCoverImage(imagePath: string | null): string | null {
   if (!imagePath) return null;
   try {
     const parsed = JSON.parse(imagePath);
     if (Array.isArray(parsed) && parsed.length > 0) return parsed[0];
-  } catch {  }
+  } catch {
+    // Not JSON — the raw value is already a single image path.
+  }
   return imagePath;
 }
+
 export default function Reservations() {
   const queryClient = useQueryClient();
   const { t } = useI18n();
@@ -71,127 +78,152 @@ export default function Reservations() {
   });
   const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
   const paginated = filtered.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
+
   if (showForm) {
     return <ReservationBuilder onClose={() => setShowForm(false)} />;
   }
+
+  const statusOptions = [
+    { value: 'all', label: t('reservations.allStatus') },
+    { value: 'active', label: t('reservations.active') },
+    { value: 'completed', label: t('reservations.completed') },
+    { value: 'cancelled', label: t('reservations.cancelled') },
+  ];
+
   return (
     <div className="p-8">
-      <div className="mb-7">
-        <h2 className="text-[26px] font-bold text-text-primary leading-tight">{t('reservations.title')}</h2>
-        <p className="text-[14px] text-text-secondary mt-1">{t('reservations.subtitle')}</p>
-      </div>
-      {}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <KPICard label={t('reservations.activeReservations')} value={stats?.active_count ?? 0} icon={<CalendarCheck size={18} />} color="blue" />
-        <KPICard label={t('reservations.totalDeposits')} value={fmt(stats?.total_deposits ?? 0)} icon={<Banknote size={18} />} color="green" />
-        <KPICard label={t('reservations.pendingCompletion')} value={stats?.pending_completion ?? 0} icon={<Clock size={18} />} color="amber" />
-        <KPICard label={t('reservations.cancelledCount')} value={stats?.cancelled_count ?? 0} icon={<XCircle size={18} />} color="red" />
-      </div>
-      {}
-      <div className="card p-4 mb-4 flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
-          <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
-            placeholder={t('reservations.searchPlaceholder')}
-            className="form-input !pl-9 !py-2 !text-[13px]" />
-        </div>
-        <CustomSelect
-          value={statusFilter}
-          onChange={(v) => { setStatusFilter(v); setPage(1); }}
-          options={[
-            { value: 'all', label: t('reservations.allStatus') },
-            { value: 'active', label: t('reservations.active') },
-            { value: 'completed', label: t('reservations.completed') },
-            { value: 'cancelled', label: t('reservations.cancelled') },
-          ]}
-          icon={<Filter size={14} />}
-          size="sm"
-          className="w-[150px]"
-        />
-        <button onClick={() => setShowForm(true)}
-          className="ml-auto px-5 py-2 rounded-lg bg-navy text-white text-[13px] font-medium hover:bg-navy-light transition-colors flex items-center gap-2">
-          <Plus size={15} /> {t('reservations.newReservation')}
-        </button>
-      </div>
-      {}
-      <div className="card overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-[13px]">
-            <thead>
-              <tr className="border-b border-border bg-surface/50">
-                <th className="text-left py-3 px-5 text-text-muted font-semibold text-[11px] uppercase tracking-wider">{t('reservations.customer')}</th>
-                <th className="text-left py-3 px-5 text-text-muted font-semibold text-[11px] uppercase tracking-wider">{t('reservations.product')}</th>
-                <th className="text-center py-3 px-5 text-text-muted font-semibold text-[11px] uppercase tracking-wider">{t('reservations.qty')}</th>
-                <th className="text-right py-3 px-5 text-text-muted font-semibold text-[11px] uppercase tracking-wider">{t('reservations.deposit')}</th>
-                <th className="text-right py-3 px-5 text-text-muted font-semibold text-[11px] uppercase tracking-wider">{t('reservations.remaining')}</th>
-                <th className="text-center py-3 px-5 text-text-muted font-semibold text-[11px] uppercase tracking-wider">{t('reservations.status')}</th>
-                <th className="text-left py-3 px-5 text-text-muted font-semibold text-[11px] uppercase tracking-wider">{t('common.date')}</th>
-                <th className="text-center py-3 px-5 text-text-muted font-semibold text-[11px] uppercase tracking-wider">{t('reservations.actions')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {paginated.length === 0 ? (
-                <tr><td colSpan={8} className="py-12 text-center text-text-muted">{t('reservations.noReservations')}</td></tr>
-              ) : (
-                paginated.map(r => (
-                  <tr key={r.id} className="border-b border-border-light hover:bg-surface/30 transition-colors">
-                    <td className="py-3 px-5 font-medium text-text-primary">{r.customer_name}</td>
-                    <td className="py-3 px-5">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-text-primary">{r.product_name}</span>
-                        {r.variant_name && (
-                          <span className="text-[10px] font-medium text-accent-blue bg-blue-50 px-1.5 py-0.5 rounded">{r.variant_name}</span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-3 px-5 text-center text-text-secondary">{r.quantity}</td>
-                    <td className="py-3 px-5 text-right font-semibold text-text-primary">{fmt(r.deposit_amount)}</td>
-                    <td className="py-3 px-5 text-right font-semibold text-accent-red">{fmt(r.remaining_amount)}</td>
-                    <td className="py-3 px-5 text-center">
-                      <StatusBadge status={r.status} />
-                    </td>
-                    <td className="py-3 px-5 text-text-muted text-[12px]">
-                      {new Date(r.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    </td>
-                    <td className="py-3 px-5">
-                      <div className="flex items-center justify-center gap-1">
-                        {r.status === 'active' && (
-                          <>
-                            <button onClick={() => setConfirmAction({ kind: 'complete', reservation: r })}
-                              className="p-1.5 rounded-md text-accent-green hover:bg-green-50 transition-colors" title={t('reservations.complete')}>
-                              <CheckCircle size={15} />
-                            </button>
-                            <button onClick={() => setConfirmAction({ kind: 'cancel', reservation: r })}
-                              className="p-1.5 rounded-md text-accent-red hover:bg-red-50 transition-colors" title={t('reservations.cancel')}>
-                              <XCircle size={15} />
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-        {}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between px-5 py-3 border-t border-border">
-            <span className="text-[12px] text-text-muted">
-              {t('reservations.showing', { start: (page - 1) * ITEMS_PER_PAGE + 1, end: Math.min(page * ITEMS_PER_PAGE, filtered.length), total: filtered.length })}
-            </span>
-            <div className="flex items-center gap-1">
-              <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
-                className="px-2.5 py-1 rounded text-[12px] text-text-secondary hover:bg-surface disabled:opacity-30 transition-colors">{t('reservations.prev')}</button>
-              <span className="px-2 text-[12px] text-text-primary font-medium">{page} / {totalPages}</span>
-              <button onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
-                className="px-2.5 py-1 rounded text-[12px] text-text-secondary hover:bg-surface disabled:opacity-30 transition-colors">{t('reservations.next')}</button>
-            </div>
+      <div className="animate-fade-up">
+        <div className="flex items-start justify-between gap-4 mb-7">
+          <div>
+            <span className="eyebrow-accent mb-3 flex w-fit">{t('sidebar.groupSell')}</span>
+            <h2 className="page-title">{t('reservations.title')}</h2>
+            <p className="page-subtitle">{t('reservations.subtitle')}</p>
           </div>
-        )}
+          <button type="button" onClick={() => setShowForm(true)} className="btn-primary shrink-0">
+            <Plus size={15} /> {t('reservations.newReservation')}
+          </button>
+        </div>
+
+        {/* KPIs */}
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+          <KPICard label={t('reservations.activeReservations')} value={stats?.active_count ?? 0} icon={<CalendarCheck size={18} />} color="blue" />
+          <KPICard label={t('reservations.totalDeposits')} value={fmt(stats?.total_deposits ?? 0)} icon={<Banknote size={18} />} color="green" />
+          <KPICard label={t('reservations.pendingCompletion')} value={stats?.pending_completion ?? 0} icon={<Clock size={18} />} color="amber" />
+          <KPICard label={t('reservations.cancelledCount')} value={stats?.cancelled_count ?? 0} icon={<XCircle size={18} />} color="red" />
+        </div>
+
+        {/* Toolbar */}
+        <div className="card p-3 mb-4 flex items-center gap-3 flex-wrap">
+          <div className="relative flex-1 min-w-[220px]">
+            <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+            <input
+              value={search}
+              onChange={e => { setSearch(e.target.value); setPage(1); }}
+              aria-label={t('reservations.searchPlaceholder')}
+              placeholder={t('reservations.searchPlaceholder')}
+              className="form-input pl-10 py-2 text-[13px]"
+            />
+          </div>
+          <Segmented
+            label={t('reservations.status')}
+            options={statusOptions}
+            value={statusFilter}
+            onChange={(v) => { setStatusFilter(v); setPage(1); }}
+          />
+        </div>
+
+        {/* Table */}
+        <div className="card overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="border-b border-border-light bg-surface/60">
+                  <th className="text-left py-3 px-5 text-[13px] font-medium text-text-muted whitespace-nowrap">{t('reservations.customer')}</th>
+                  <th className="text-left py-3 px-5 text-[13px] font-medium text-text-muted whitespace-nowrap">{t('reservations.product')}</th>
+                  <th className="text-center py-3 px-5 text-[13px] font-medium text-text-muted whitespace-nowrap">{t('reservations.qty')}</th>
+                  <th className="text-right py-3 px-5 text-[13px] font-medium text-text-muted whitespace-nowrap">{t('reservations.deposit')}</th>
+                  <th className="text-right py-3 px-5 text-[13px] font-medium text-text-muted whitespace-nowrap">{t('reservations.remaining')}</th>
+                  <th className="text-center py-3 px-5 text-[13px] font-medium text-text-muted whitespace-nowrap">{t('reservations.status')}</th>
+                  <th className="text-left py-3 px-5 text-[13px] font-medium text-text-muted whitespace-nowrap">{t('common.date')}</th>
+                  <th className="text-center py-3 px-5 text-[13px] font-medium text-text-muted whitespace-nowrap">{t('reservations.actions')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginated.length === 0 ? (
+                  <tr><td colSpan={8} className="py-10">
+                    <EmptyState
+                      icon={<CalendarCheck size={20} />}
+                      message={t('reservations.noReservations')}
+                      action={
+                        <button type="button" onClick={() => setShowForm(true)} className={`btn-secondary px-3.5 py-1.5 text-[13px] rounded-lg ${FOCUS}`}>
+                          <Plus size={14} /> {t('reservations.newReservation')}
+                        </button>
+                      }
+                    />
+                  </td></tr>
+                ) : (
+                  paginated.map(r => (
+                    <tr key={r.id} className="border-b border-border-light last:border-0 hover:bg-surface transition-colors">
+                      <td className="py-3 px-5 font-medium text-text-primary">{r.customer_name}</td>
+                      <td className="py-3 px-5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-text-primary">{r.product_name}</span>
+                          {r.variant_name && (
+                            <span className="badge bg-accent-blue/10 text-accent-blue text-[13px] px-2 py-0.5">{r.variant_name}</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3 px-5 text-center text-text-secondary tabular-nums">{r.quantity}</td>
+                      <td className="py-3 px-5 text-right text-text-primary tabular-nums">{fmt(r.deposit_amount)}</td>
+                      <td className="py-3 px-5 text-right font-semibold text-accent-red tabular-nums">{fmt(r.remaining_amount)}</td>
+                      <td className="py-3 px-5 text-center">
+                        <StatusBadge status={r.status} />
+                      </td>
+                      <td className="py-3 px-5 text-text-muted text-[13px] whitespace-nowrap">
+                        {new Date(r.created_at).toLocaleDateString(uiLocale(), { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </td>
+                      <td className="py-3 px-5">
+                        <div className="flex items-center justify-center gap-1">
+                          {r.status === 'active' && (
+                            <>
+                              <button type="button" onClick={() => setConfirmAction({ kind: 'complete', reservation: r })}
+                                aria-label={t('reservations.complete')} title={t('reservations.complete')}
+                                className={`w-8 h-8 inline-flex items-center justify-center rounded-lg text-accent-green hover:bg-accent-green/10 transition-colors ${FOCUS}`}>
+                                <CheckCircle size={16} />
+                              </button>
+                              <button type="button" onClick={() => setConfirmAction({ kind: 'cancel', reservation: r })}
+                                aria-label={t('reservations.cancel')} title={t('reservations.cancel')}
+                                className={`w-8 h-8 inline-flex items-center justify-center rounded-lg text-accent-red hover:bg-accent-red/10 transition-colors ${FOCUS}`}>
+                                <XCircle size={16} />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between gap-4 px-5 py-3 border-t border-border-light">
+              <span className="text-[13px] text-text-muted tabular-nums">
+                {t('reservations.showing', { start: (page - 1) * ITEMS_PER_PAGE + 1, end: Math.min(page * ITEMS_PER_PAGE, filtered.length), total: filtered.length })}
+              </span>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}
+                  className={`btn-secondary px-3 py-1.5 text-[13px] rounded-lg ${FOCUS}`}>{t('reservations.prev')}</button>
+                <span className="px-1 text-[13px] font-medium text-text-primary tabular-nums">{page} / {totalPages}</span>
+                <button type="button" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}
+                  className={`btn-secondary px-3 py-1.5 text-[13px] rounded-lg ${FOCUS}`}>{t('reservations.next')}</button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
+      {/* Rendered outside the animated wrapper so the fixed overlay covers the viewport. */}
       <ConfirmDialog
         open={!!confirmAction}
         variant={confirmAction?.kind === 'cancel' ? 'danger' : 'default'}
@@ -213,29 +245,71 @@ export default function Reservations() {
     </div>
   );
 }
-function KPICard({ label, value, icon, color }: { label: string; value: string | number; icon: React.ReactNode; color: string }) {
-  const bg = color === 'blue' ? 'bg-blue-50 text-accent-blue' :
-             color === 'green' ? 'bg-green-50 text-accent-green' :
-             color === 'amber' ? 'bg-amber-50 text-amber-600' :
-             'bg-red-50 text-accent-red';
+
+function Segmented({ label, options, value, onChange }: {
+  label: string;
+  options: { value: string; label: string }[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
   return (
-    <div className="card p-4">
-      <div className="flex items-center gap-3">
-        <div className={`w-9 h-9 rounded-lg ${bg} flex items-center justify-center`}>{icon}</div>
-        <div>
-          <p className="text-[10px] font-semibold text-text-muted tracking-[0.06em] uppercase">{label}</p>
-          <p className="text-[20px] font-bold text-text-primary leading-tight mt-0.5">{value}</p>
+    <div role="group" aria-label={label}
+      className="inline-flex max-w-full gap-1 p-1 rounded-xl bg-surface border border-border-light overflow-x-auto">
+      {options.map(opt => {
+        const active = opt.value === value;
+        return (
+          <button
+            key={opt.value}
+            type="button"
+            aria-pressed={active}
+            onClick={() => onChange(opt.value)}
+            className={`px-3 py-1.5 rounded-lg text-[13px] font-medium whitespace-nowrap transition-colors ${FOCUS} ${
+              active ? 'bg-card text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'
+            }`}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function EmptyState({ icon, message, action }: { icon: ReactNode; message: string; action?: ReactNode }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-3 text-center">
+      <span className="w-11 h-11 rounded-full bg-surface text-text-muted flex items-center justify-center">{icon}</span>
+      <p className="text-[13px] text-text-secondary">{message}</p>
+      {action}
+    </div>
+  );
+}
+
+function KPICard({ label, value, icon, color }: { label: string; value: string | number; icon: ReactNode; color: string }) {
+  const tone = color === 'blue' ? 'bg-accent-blue/10 text-accent-blue' :
+               color === 'green' ? 'bg-accent-green/10 text-accent-green' :
+               color === 'amber' ? 'bg-accent-orange/10 text-accent-orange' :
+               'bg-accent-red/10 text-accent-red';
+  return (
+    <div className="card p-5">
+      <div className="flex items-center gap-3.5">
+        <div className={`w-10 h-10 rounded-xl ${tone} flex items-center justify-center flex-shrink-0`}>{icon}</div>
+        <div className="min-w-0">
+          <p className="text-[13px] font-medium text-text-secondary truncate">{label}</p>
+          <p className="text-[22px] font-semibold tracking-[-0.02em] text-text-primary tabular-nums leading-tight mt-0.5">{value}</p>
         </div>
       </div>
     </div>
   );
 }
+
 function StatusBadge({ status }: { status: string }) {
-  const cls = status === 'active' ? 'bg-blue-50 text-accent-blue' :
-              status === 'completed' ? 'bg-green-50 text-accent-green' :
-              'bg-red-50 text-accent-red';
-  return <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold capitalize ${cls}`}>{status}</span>;
+  const tone = status === 'active' ? 'bg-accent-blue/10 text-accent-blue' :
+               status === 'completed' ? 'bg-accent-green/10 text-accent-green' :
+               'bg-accent-red/10 text-accent-red';
+  return <span className={`badge capitalize ${tone}`}>{status}</span>;
 }
+
 function ReservationBuilder({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
@@ -280,12 +354,11 @@ function ReservationBuilder({ onClose }: { onClose: () => void }) {
   // merchant doesn't have to click a single option. (Variants are mandatory,
   // so a product always has at least one.) Inlined here rather than calling
   // selectVariant (defined below) to avoid a temporal-dead-zone reference.
-  useEffect(() => {
-    if (selectedProduct && variants && variants.length === 1 && !selectedVariant && variants[0]) {
-      setSelectedVariant(variants[0]);
-      setTotalPrice(variants[0].selling_price.toString());
-    }
-  }, [variants, selectedProduct, selectedVariant]);
+  // Done during render rather than in an effect; the condition is false once the variant is set, so it settles in one pass.
+  if (selectedProduct && variants && variants.length === 1 && !selectedVariant && variants[0]) {
+    setSelectedVariant(variants[0]);
+    setTotalPrice(variants[0].selling_price.toString());
+  }
   const filteredCustomers = (customers ?? []).filter(c =>
     c.name.toLowerCase().includes(customerSearch.toLowerCase())
   ).slice(0, 8);
@@ -321,45 +394,48 @@ function ReservationBuilder({ onClose }: { onClose: () => void }) {
       notes: notes || null,
     });
   };
+
+  const categoryOptions = [
+    { value: 'all', label: t('reservations.allCategory') },
+    ...(categories ?? []).map(c => ({ value: c.name, label: c.name })),
+  ];
+
   return (
-    <div className="flex h-screen overflow-hidden">
-      {}
+    <div className="flex h-screen overflow-hidden animate-fade-up">
+      {/* Product catalogue */}
       <div className="flex-1 overflow-y-auto p-8">
-        <div className="flex items-center gap-3 mb-5">
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-card border border-transparent hover:border-border transition-colors">
-            <ArrowLeft size={20} />
+        <div className="flex items-center gap-4 mb-6">
+          <button type="button" onClick={onClose} aria-label={t('common.back')}
+            className={`p-2 rounded-lg text-text-secondary hover:bg-surface hover:text-text-primary transition-colors ${FOCUS}`}>
+            <ArrowLeft size={18} />
           </button>
           <div>
-            <h2 className="text-[22px] font-bold text-text-primary">{t('reservations.newReservationTitle')}</h2>
-            <p className="text-[13px] text-text-secondary">{t('reservations.selectProductDesc')}</p>
+            <h2 className="page-title">{t('reservations.newReservationTitle')}</h2>
+            <p className="page-subtitle">{t('reservations.selectProductDesc')}</p>
           </div>
         </div>
-        {}
-        <div className="flex items-center gap-2 mb-4 flex-wrap">
-          <button onClick={() => setActiveCategory('all')}
-            className={`px-3.5 py-1.5 rounded-full text-[12px] font-medium transition-colors ${activeCategory === 'all' ? 'bg-navy text-white' : 'bg-card border border-border text-text-secondary hover:bg-surface'}`}>
-            {t('reservations.allCategory')}
-          </button>
-          {(categories ?? []).map(c => (
-            <button key={c.id} onClick={() => setActiveCategory(c.name)}
-              className={`px-3.5 py-1.5 rounded-full text-[12px] font-medium transition-colors ${activeCategory === c.name ? 'bg-navy text-white' : 'bg-card border border-border text-text-secondary hover:bg-surface'}`}>
-              {c.name}
-            </button>
-          ))}
+
+        <div className="mb-4 max-w-full">
+          <Segmented
+            label={t('common.allCategories')}
+            options={categoryOptions}
+            value={activeCategory}
+            onChange={setActiveCategory}
+          />
         </div>
-        {}
-        <div className="relative mb-4">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+
+        <div className="relative mb-5">
+          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
           <input value={productSearch} onChange={e => setProductSearch(e.target.value)}
+            aria-label={t('reservations.searchProducts')}
             placeholder={t('reservations.searchProducts')}
-            className="w-full pl-9 pr-4 py-2 rounded-lg border border-border text-[13px] focus:outline-none focus:ring-2 focus:ring-navy/15 bg-surface" />
+            className="form-input pl-10 py-2 text-[13px]" />
         </div>
-        {}
-        <div className="grid grid-cols-3 gap-3">
+
+        <div className="grid grid-cols-2 xl:grid-cols-3 gap-4">
           {filteredProducts.length === 0 ? (
-            <div className="col-span-3 py-12 text-center text-text-muted">
-              <Package size={28} className="mx-auto mb-2 opacity-30" />
-              {t('reservations.noProductsFound')}
+            <div className="col-span-full py-12">
+              <EmptyState icon={<Package size={20} />} message={t('reservations.noProductsFound')} />
             </div>
           ) : (
             filteredProducts.map(p => {
@@ -367,119 +443,129 @@ function ReservationBuilder({ onClose }: { onClose: () => void }) {
               const isSelected = selectedProduct?.id === p.id;
               const soldOut = p.quantity <= 0;
               return (
-                <button key={p.id} onClick={() => !soldOut && selectProduct(p)} disabled={soldOut}
-                  className={`card overflow-hidden text-left transition-all ${isSelected ? 'ring-2 ring-navy border-navy' : 'hover:shadow-md'} ${soldOut ? 'opacity-50' : ''}`}>
-                  <div className="relative h-28 bg-gradient-to-br from-gray-100 to-gray-50 flex items-center justify-center">
-                    {img ? (
-                      <img src={convertFileSrc(img)} alt={p.name} className="w-full h-full object-cover" />
-                    ) : (
-                      <Package size={24} className="text-gray-300" />
-                    )}
+                <button key={p.id} type="button" onClick={() => !soldOut && selectProduct(p)} disabled={soldOut}
+                  aria-pressed={isSelected}
+                  className={`card overflow-hidden text-left transition-[box-shadow,opacity] duration-150 enabled:hover:shadow-md disabled:cursor-not-allowed ${FOCUS} ${
+                    isSelected ? 'ring-2 ring-navy border-navy' : ''
+                  } ${soldOut ? 'opacity-50' : ''}`}>
+                  <span className="relative block h-28 bg-surface">
+                    <span className="absolute inset-0 flex items-center justify-center">
+                      {img ? (
+                        <img src={convertFileSrc(img)} alt={p.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <Package size={24} className="text-text-muted" />
+                      )}
+                    </span>
                     {soldOut && (
-                      <span className="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-accent-red/90 text-[10px] font-semibold text-white">
+                      <span className="badge absolute top-2.5 right-2.5 bg-accent-red text-white text-[13px] font-semibold px-2 py-0.5">
                         {t('checkout.soldOut')}
                       </span>
                     )}
                     {!soldOut && p.quantity <= 5 && (
-                      <span className="absolute top-2 right-2 px-2 py-0.5 rounded-full bg-amber-500/90 text-[10px] font-semibold text-white">
+                      <span className="badge absolute top-2.5 right-2.5 bg-accent-orange text-white text-[13px] font-semibold px-2 py-0.5">
                         {t('reservations.lowStock')}
                       </span>
                     )}
-                  </div>
-                  <div className="p-2.5">
-                    <p className="text-[10px] font-semibold text-text-muted uppercase">{p.category_name ?? t('checkout.uncategorized')}</p>
-                    <p className="text-[12.5px] font-bold text-text-primary mt-0.5 truncate">{p.name}</p>
-                    <div className="flex items-center justify-between mt-1">
-                      <span className="text-[12px] font-bold text-text-primary">{fmt(p.selling_price)}</span>
-                      <span className="text-[10px] text-text-muted">{t('reservations.unitsCount', { count: p.quantity })}</span>
-                    </div>
-                  </div>
+                  </span>
+                  <span className="block p-3">
+                    <span className="block text-[13px] font-medium text-text-muted truncate">{p.category_name ?? t('checkout.uncategorized')}</span>
+                    <span className="block text-[13px] font-semibold text-text-primary mt-0.5 truncate">{p.name}</span>
+                    <span className="flex items-center justify-between gap-2 mt-1.5">
+                      <span className="text-[13px] font-semibold text-text-primary tabular-nums">{fmt(p.selling_price)}</span>
+                      <span className="text-[13px] text-text-muted tabular-nums">{t('reservations.unitsCount', { count: p.quantity })}</span>
+                    </span>
+                  </span>
                 </button>
               );
             })
           )}
         </div>
       </div>
-      {}
+
+      {/* Reservation details */}
       <div className="w-[380px] min-w-[380px] bg-card border-l border-border flex flex-col h-full">
-        <div className="px-5 py-4 border-b border-border">
-          <h3 className="text-[15px] font-bold text-text-primary">{t('reservations.reservationDetails')}</h3>
+        <div className="px-5 py-4 border-b border-border-light">
+          <h3 className="text-[15px] font-semibold text-text-primary">{t('reservations.reservationDetails')}</h3>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          {}
+        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-5">
           {!selectedProduct ? (
-            <div className="flex flex-col items-center justify-center py-12 text-text-muted">
-              <Package size={28} className="mb-2 opacity-30" />
-              <p className="text-[13px]">{t('reservations.selectProductPrompt')}</p>
-            </div>
+            <EmptyState icon={<Package size={20} />} message={t('reservations.selectProductPrompt')} />
           ) : (
             <>
-              {}
-              <div className="p-3 rounded-xl border border-border bg-surface">
-                <div className="flex gap-3">
-                  <div className="w-14 h-14 rounded-lg bg-surface flex items-center justify-center flex-shrink-0 overflow-hidden border border-border-light">
-                    {coverImg ? <img src={convertFileSrc(coverImg)} alt="" className="w-full h-full object-cover" /> : <Package size={18} className="text-text-muted" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[13px] font-bold text-text-primary truncate">{selectedProduct.name}</p>
-                    <p className="text-[12px] text-text-muted">{selectedProduct.category_name ?? t('checkout.uncategorized')}</p>
-                    <p className="text-[13px] font-bold text-navy mt-0.5">{fmt(selectedProduct.selling_price)}</p>
-                  </div>
-                  <button onClick={() => { setSelectedProduct(null); setSelectedVariant(null); }}
-                    className="text-text-muted hover:text-accent-red self-start"><X size={14} /></button>
+              {/* Selected product */}
+              <div className="p-3 rounded-xl border border-border bg-surface flex gap-3">
+                <div className="w-14 h-14 rounded-lg bg-card flex items-center justify-center flex-shrink-0 overflow-hidden border border-border-light">
+                  {coverImg ? <img src={convertFileSrc(coverImg)} alt="" className="w-full h-full object-cover" /> : <Package size={18} className="text-text-muted" />}
                 </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[13px] font-semibold text-text-primary truncate">{selectedProduct.name}</p>
+                  <p className="text-[13px] text-text-muted truncate">{selectedProduct.category_name ?? t('checkout.uncategorized')}</p>
+                  <p className="text-[13px] font-semibold text-navy mt-0.5 tabular-nums">{fmt(selectedProduct.selling_price)}</p>
+                </div>
+                <button type="button" onClick={() => { setSelectedProduct(null); setSelectedVariant(null); }}
+                  aria-label={t('common.remove')}
+                  className={`p-1 rounded-md text-text-muted hover:text-accent-red hover:bg-accent-red/10 self-start transition-colors ${FOCUS}`}>
+                  <X size={14} />
+                </button>
               </div>
-              {}
+
               {/* Variants are the only sellable unit, so the picker lists them
                   exclusively — there is no "base product" option to reserve. */}
               {variants && variants.length > 0 && (
                 <div>
-                  <label className="block text-[11px] font-semibold text-text-muted tracking-[0.06em] uppercase mb-2">{t('reservations.selectVariantLabel')}</label>
-                  <div className="space-y-1.5">
+                  <p className="text-[13px] font-medium text-text-secondary mb-2">{t('reservations.selectVariantLabel')}</p>
+                  <div className="space-y-2">
                     {variants.map(v => {
                       const vImg = getCoverImage(v.image_path ?? null);
+                      const selected = selectedVariant?.id === v.id;
                       return (
-                        <button key={v.id} onClick={() => selectVariant(v)}
-                          className={`w-full flex items-center gap-2.5 p-2.5 rounded-lg border text-[12.5px] transition-colors text-left ${selectedVariant?.id === v.id ? 'border-navy bg-navy/5 font-medium' : 'border-border text-text-secondary hover:bg-surface'}`}>
-                          <div className="w-8 h-8 rounded bg-surface flex items-center justify-center flex-shrink-0 overflow-hidden">
+                        <button key={v.id} type="button" onClick={() => selectVariant(v)} aria-pressed={selected}
+                          className={`w-full flex items-center gap-3 p-2.5 rounded-xl border text-[13px] transition-colors text-left ${FOCUS} ${
+                            selected ? 'border-navy bg-navy/5' : 'border-border text-text-secondary hover:bg-surface'
+                          }`}>
+                          <span className="w-9 h-9 rounded-lg bg-surface flex items-center justify-center flex-shrink-0 overflow-hidden">
                             {vImg ? <img src={convertFileSrc(vImg)} alt="" className="w-full h-full object-cover" /> : <Layers size={14} className="text-accent-blue" />}
-                          </div>
-                          <div className="flex-1">
-                            <p className="font-semibold text-text-primary">{v.variant_name}</p>
-                            <p className="text-[10px] text-text-muted">{t('reservations.availableCount', { count: v.quantity })}</p>
-                          </div>
-                          <span className="font-bold text-text-primary">{fmt(v.selling_price)}</span>
+                          </span>
+                          <span className="flex-1 min-w-0">
+                            <span className="block font-semibold text-text-primary truncate">{v.variant_name}</span>
+                            <span className="block text-[13px] text-text-muted">{t('reservations.availableCount', { count: v.quantity })}</span>
+                          </span>
+                          <span className="font-semibold text-text-primary tabular-nums">{fmt(v.selling_price)}</span>
                         </button>
                       );
                     })}
                   </div>
                 </div>
               )}
-              {}
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface border border-border-light text-[12px]">
+
+              <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-surface text-[13px]">
                 <Package size={14} className="text-text-muted" />
                 <span className="text-text-secondary">{t('reservations.availableStock')}</span>
-                <span className="font-bold text-text-primary">{availableStock} {t('reservations.unitsLabel')}</span>
+                <span className="font-semibold text-text-primary tabular-nums">{availableStock} {t('reservations.unitsLabel')}</span>
               </div>
-              {}
+
+              {/* Customer */}
               <div>
-                <label className="block text-[11px] font-semibold text-text-muted tracking-[0.06em] uppercase mb-1.5">{t('reservations.customerLabel')}</label>
+                <label htmlFor="reservation-customer" className="block text-[13px] font-medium text-text-secondary mb-1.5">{t('reservations.customerLabel')}</label>
                 {customerId ? (
-                  <div className="flex items-center justify-between p-2.5 rounded-lg bg-surface border border-border">
+                  <div className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-surface border border-border">
                     <span className="text-[13px] font-medium text-text-primary">{customers?.find(c => c.id === customerId)?.name}</span>
-                    <button onClick={() => setCustomerId(null)} className="text-text-muted hover:text-accent-red"><X size={14} /></button>
+                    <button type="button" onClick={() => setCustomerId(null)} aria-label={t('common.remove')}
+                      className={`p-1 rounded-md text-text-muted hover:text-accent-red hover:bg-accent-red/10 transition-colors ${FOCUS}`}>
+                      <X size={14} />
+                    </button>
                   </div>
                 ) : (
                   <div className="relative">
-                    <input value={customerSearch} onChange={e => setCustomerSearch(e.target.value)}
-                      placeholder={t('reservations.searchCustomer')} className="form-input !py-2 !text-[13px]" />
+                    <input id="reservation-customer" value={customerSearch} onChange={e => setCustomerSearch(e.target.value)}
+                      placeholder={t('reservations.searchCustomer')} className="form-input py-2 text-[13px]" />
                     {customerSearch && (
-                      <div className="absolute top-full mt-1 left-0 right-0 bg-card rounded-lg border border-border shadow-lg z-20 max-h-40 overflow-y-auto">
+                      <div className="absolute top-full mt-1.5 left-0 right-0 bg-card rounded-xl border border-border shadow-raised z-20 max-h-48 overflow-y-auto p-1">
                         {filteredCustomers.map(c => (
-                          <button key={c.id} onClick={() => { setCustomerId(c.id); setCustomerSearch(''); }}
-                            className="w-full text-left px-3.5 py-2 text-[13px] hover:bg-surface transition-colors text-text-primary">
+                          <button key={c.id} type="button" onClick={() => { setCustomerId(c.id); setCustomerSearch(''); }}
+                            className="w-full text-left px-3 py-2 rounded-lg text-[13px] hover:bg-surface transition-colors text-text-primary">
                             <span className="font-medium">{c.name}</span>
-                            {c.phone && <span className="text-text-muted ml-2 text-[11px]">{c.phone}</span>}
+                            {c.phone && <span className="text-text-muted ml-2 text-[13px]">{c.phone}</span>}
                           </button>
                         ))}
                       </div>
@@ -487,47 +573,50 @@ function ReservationBuilder({ onClose }: { onClose: () => void }) {
                   </div>
                 )}
               </div>
-              {}
-              <div className="grid grid-cols-3 gap-2.5">
+
+              {/* Qty / total / deposit */}
+              <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-[11px] font-semibold text-text-muted tracking-[0.06em] uppercase mb-1.5">{t('reservations.qtyLabel')}</label>
-                  <input type="number" min={1} max={availableStock} value={quantity} onChange={e => setQuantity(parseInt(e.target.value) || 1)}
-                    className="form-input !py-2 !text-[13px]" />
+                  <label htmlFor="reservation-qty" className="block text-[13px] font-medium text-text-secondary mb-1.5">{t('reservations.qtyLabel')}</label>
+                  <input id="reservation-qty" type="number" min={1} max={availableStock} value={quantity} onChange={e => setQuantity(parseInt(e.target.value) || 1)}
+                    className="form-input py-2 text-[13px] tabular-nums" />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold text-text-muted tracking-[0.06em] uppercase mb-1.5">{t('reservations.totalLabel')}</label>
-                  <input type="number" step="0.01" value={totalPrice} onChange={e => setTotalPrice(e.target.value)}
-                    placeholder="0.00" className="form-input !py-2 !text-[13px]" />
+                  <label htmlFor="reservation-total" className="block text-[13px] font-medium text-text-secondary mb-1.5">{t('reservations.totalLabel')}</label>
+                  <input id="reservation-total" type="number" step="0.01" value={totalPrice} onChange={e => setTotalPrice(e.target.value)}
+                    placeholder="0.00" className="form-input py-2 text-[13px] tabular-nums" />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold text-text-muted tracking-[0.06em] uppercase mb-1.5">{t('reservations.depositLabel')}</label>
-                  <input type="number" step="0.01" value={deposit} onChange={e => setDeposit(e.target.value)}
-                    placeholder="0.00" className="form-input !py-2 !text-[13px]" />
+                  <label htmlFor="reservation-deposit" className="block text-[13px] font-medium text-text-secondary mb-1.5">{t('reservations.depositLabel')}</label>
+                  <input id="reservation-deposit" type="number" step="0.01" value={deposit} onChange={e => setDeposit(e.target.value)}
+                    placeholder="0.00" className="form-input py-2 text-[13px] tabular-nums" />
                 </div>
               </div>
-              {}
-              <div className="flex items-center justify-between px-4 py-3 rounded-lg bg-surface border border-border-light">
+
+              {/* Remaining */}
+              <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-surface">
                 <span className="text-[13px] text-text-secondary">{t('reservations.remainingToPay')}</span>
-                <span className="text-[16px] font-bold text-accent-red">{fmt(Math.max(0, remaining))}</span>
+                <span className="text-[16px] font-semibold text-accent-red tabular-nums">{fmt(Math.max(0, remaining))}</span>
               </div>
-              {}
+
+              {/* Notes */}
               <div>
-                <label className="block text-[11px] font-semibold text-text-muted tracking-[0.06em] uppercase mb-1.5">{t('reservations.notesLabel')}</label>
-                <textarea value={notes} onChange={e => setNotes(e.target.value)}
-                  rows={2} className="form-input !py-2 !text-[13px]" placeholder={t('reservations.optionalNotes')} />
+                <label htmlFor="reservation-notes" className="block text-[13px] font-medium text-text-secondary mb-1.5">{t('reservations.notesLabel')}</label>
+                <textarea id="reservation-notes" value={notes} onChange={e => setNotes(e.target.value)}
+                  rows={2} className="form-input py-2 text-[13px] resize-none" placeholder={t('reservations.optionalNotes')} />
               </div>
             </>
           )}
         </div>
-        {}
+
         {selectedProduct && (
-          <div className="border-t border-border px-5 py-4 space-y-3">
-            <button onClick={handleSubmit} disabled={!customerId || !selectedVariant || createMutation.isPending}
-              className="w-full py-3 rounded-lg bg-navy text-white text-[13.5px] font-semibold hover:bg-navy-light disabled:opacity-50 transition-colors">
+          <div className="border-t border-border-light px-5 py-4 space-y-3">
+            <button type="button" onClick={handleSubmit} disabled={!customerId || !selectedVariant || createMutation.isPending}
+              className="btn-primary w-full py-3 text-[14px]">
               {createMutation.isPending ? t('reservations.creating') : t('reservations.createAmount', { amount: fmt(parseFloat(totalPrice) || 0) })}
             </button>
             {createMutation.isError && (
-              <p className="text-[12px] text-accent-red">{String(createMutation.error)}</p>
+              <p className="text-[13px] text-accent-red">{String(createMutation.error)}</p>
             )}
           </div>
         )}

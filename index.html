@@ -4,8 +4,11 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
     <title>HouPhone Shop</title>
     <style>
+      /* Loading splash, shown before React mounts. Same ground and glow as the app (QR-Sense dark). */
+      html, body { background: #060a14; }
       #splash {
         position: fixed;
         inset: 0;
@@ -13,56 +16,75 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        background: #F8F9FB;
+        gap: 10px;
+        background-color: #060a14;
+        background-image:
+          radial-gradient(900px 520px at 50% -120px, rgba(37, 99, 235, 0.42), transparent 70%),
+          radial-gradient(520px 340px at 85% 0, rgba(59, 130, 246, 0.14), transparent 70%);
         z-index: 9999;
-        transition: opacity 0.4s ease, visibility 0.4s ease;
-      }
-      html.dark #splash {
-        background: #0B1120;
+        transition: opacity 0.35s ease, visibility 0.35s ease;
       }
       #splash.fade-out {
         opacity: 0;
         visibility: hidden;
       }
+      #splash .tile {
+        width: 64px;
+        height: 64px;
+        padding: 8px;
+        box-sizing: border-box;
+        border-radius: 18px;
+        background: #faf8fd;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 8px;
+      }
       #splash img {
-        width: 72px;
-        height: 72px;
+        width: 100%;
+        height: 100%;
         object-fit: contain;
-        animation: pulse-logo 1.8s ease-in-out infinite;
       }
       #splash .brand {
-        margin-top: 16px;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        font-size: 18px;
-        font-weight: 700;
-        color: #1E293B;
-        letter-spacing: -0.02em;
+        font-family: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        font-size: 32px;
+        line-height: 36px;
+        font-weight: 600;
+        color: #faf8fd;
+        letter-spacing: -0.05em;
+        /* The shop name sets its own direction, so the full stop stays at its end in Arabic too. */
+        unicode-bidi: plaintext;
       }
-      html.dark #splash .brand {
-        color: #E8ECF2;
+      #splash .brand::after {
+        content: ".";
+        color: #3b82f6;
       }
       #splash .subtitle {
-        margin-top: 4px;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        font-size: 11px;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
         font-weight: 500;
-        color: #9CA3AF;
-        letter-spacing: 0.04em;
+        color: #93c5fd;
+        letter-spacing: 0.14em;
       }
-      html.dark #splash .subtitle {
-        color: #4B5C6E;
+      #splash .subtitle::before {
+        content: "";
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #3b82f6;
+        box-shadow: 0 0 12px rgba(59, 130, 246, 0.9);
       }
       #splash .loader {
-        margin-top: 28px;
-        width: 32px;
+        margin-top: 24px;
+        width: 40px;
         height: 3px;
         border-radius: 3px;
-        background: #E5E7EB;
+        background: rgba(250, 248, 253, 0.07);
         overflow: hidden;
         position: relative;
-      }
-      html.dark #splash .loader {
-        background: #1F2937;
       }
       #splash .loader::after {
         content: '';
@@ -72,73 +94,27 @@
         width: 40%;
         height: 100%;
         border-radius: 3px;
-        background: #1E293B;
+        background: #3b82f6;
         animation: loader-slide 1.2s ease-in-out infinite;
-      }
-      html.dark #splash .loader::after {
-        background: #60A5FA;
-      }
-      @keyframes pulse-logo {
-        0%, 100% { transform: scale(1); opacity: 1; }
-        50% { transform: scale(1.06); opacity: 0.8; }
       }
       @keyframes loader-slide {
         0% { left: -40%; }
         100% { left: 100%; }
       }
+      @media (prefers-reduced-motion: reduce) {
+        #splash .loader::after { animation: none; left: 30%; }
+      }
     </style>
-    <script>
-      // Theme + custom logo must apply BEFORE first paint so the loading
-      // animation and favicon match branding (React is not running yet).
-      (function () {
-        try {
-          if (localStorage.getItem('shop_theme') === 'dark') {
-            document.documentElement.classList.add('dark');
-          }
-        } catch (e) { /* ignore */ }
-        try {
-          var customLogo = localStorage.getItem('shop_logo_data_url');
-          if (customLogo && customLogo.indexOf('data:image/') === 0) {
-            window.__SHOP_CUSTOM_LOGO__ = customLogo;
-          }
-        } catch (e) { /* ignore */ }
-        try {
-          var customName = localStorage.getItem('shop_name');
-          if (customName && customName.trim()) {
-            window.__SHOP_CUSTOM_NAME__ = customName.trim();
-          }
-        } catch (e) { /* ignore */ }
-      })();
-    </script>
+    <script src="/boot-theme.js"></script>
   </head>
   <body>
     <div id="splash">
-      <img id="splash-logo" src="/logo.png" alt="HouPhone Shop" />
+      <div class="tile"><img id="splash-logo" src="/logo.png" alt="" /></div>
       <div class="brand" id="splash-brand">HouPhone Shop</div>
       <div class="subtitle">MANAGEMENT SUITE</div>
       <div class="loader"></div>
     </div>
-    <script>
-      // Swap splash + tab icon to the cached custom logo as soon as the body exists.
-      (function () {
-        var logo = window.__SHOP_CUSTOM_LOGO__;
-        var name = window.__SHOP_CUSTOM_NAME__;
-        if (logo) {
-          var img = document.getElementById('splash-logo');
-          if (img) img.src = logo;
-          var link = document.querySelector("link[rel='icon']");
-          if (link) {
-            link.type = 'image/png';
-            link.href = logo;
-          }
-        }
-        if (name) {
-          var brand = document.getElementById('splash-brand');
-          if (brand) brand.textContent = name;
-          document.title = name;
-        }
-      })();
-    </script>
+    <script src="/boot-splash.js"></script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

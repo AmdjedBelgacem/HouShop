@@ -7,14 +7,14 @@ edition = "2021"
 
 [lib]
 name = "shop_management_app_lib"
-crate-type = ["lib", "cdylib", "staticlib"]
+crate-type = ["lib", "cdylib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2.7", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset", "image-png"] }
-tauri-plugin-shell = "2"
+tauri = { version = "2.12", features = ["protocol-asset", "image-png"] }
+tauri-plugin-shell = "2.6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
@@ -24,6 +24,16 @@ bcrypt = "0.16"
 base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
 thiserror = "2"
+sha2 = "0.10"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+axum = { version = "0.7", features = ["multipart", "ws"] }
+tower-http = { version = "0.5", features = ["cors"] }
+# HTTPS for the phone test page: phone browsers (iPhone Safari above all)
+# only allow the camera and microphone on secure pages.
+axum-server = { version = "0.7", features = ["tls-rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rcgen = { version = "0.13", default-features = false, features = ["crypto", "pem", "ring"] }
+time = "0.3"
 
 [features]
 default = ["custom-protocol"]
@@ -42,3 +52,6 @@ windows-sys = { version = "0.59", features = [
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Printing",
 ] }
+
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }

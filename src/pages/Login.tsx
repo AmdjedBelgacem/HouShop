@@ -1,173 +1,193 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { useAuth } from '../hooks/useAuth';
+import { useAuth } from '../hooks/authContext';
 import { useI18n } from '../i18n';
-import { useBranding } from '../hooks/useBranding';
+import { useBranding } from '../hooks/brandingContext';
 import type { LoginResponse } from '../lib/types';
 import { Eye, EyeOff, User, Lock, ArrowRight, Loader2 } from 'lucide-react';
+
 export default function Login() {
   const { login } = useAuth();
   const { t } = useI18n();
   const { logoUrl, shopName } = useBranding();
+
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  // null while checking; true when no account exists yet, so the create-administrator form is shown
+  const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    invoke<boolean>('has_users')
+      .then((hasUsers) => setNeedsSetup(!hasUsers))
+      .catch(() => setNeedsSetup(false));
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    if (needsSetup) {
+      if (password.length < 8) {
+        setError(t('login.passwordTooShort'));
+        return;
+      }
+      if (password !== confirmPassword) {
+        setError(t('login.passwordMismatch'));
+        return;
+      }
+    }
+
     setLoading(true);
     try {
+      if (needsSetup) {
+        await invoke('create_initial_admin', { username, password });
+        setNeedsSetup(false);
+      }
       const response = await invoke<LoginResponse>('login', {
         request: { username, password },
       });
       login(response);
     } catch (err) {
-      setError(typeof err === 'string' ? err : t('login.failed'));
+      const fallback = needsSetup ? t('login.setupFailed') : t('login.failed');
+      setError(typeof err === 'string' ? err : fallback);
     } finally {
       setLoading(false);
     }
   };
+
+  const submitDisabled =
+    loading ||
+    needsSetup === null ||
+    !username ||
+    !password ||
+    (needsSetup === true && !confirmPassword);
+
   return (
-    <div className="h-screen w-screen flex overflow-hidden bg-surface">
-      {}
-      <div className="hidden lg:flex lg:w-[55%] relative flex-col items-center justify-center overflow-hidden"
-        style={{ background: 'linear-gradient(135deg, #0F172A 0%, #1E293B 50%, #334155 100%)' }}>
-        {}
-        <div className="absolute -top-32 -left-32 w-96 h-96 rounded-full opacity-[0.04]" style={{ background: 'white' }} />
-        <div className="absolute -bottom-48 -right-24 w-[500px] h-[500px] rounded-full opacity-[0.03]" style={{ background: 'white' }} />
-        <div className="absolute top-1/4 right-1/4 w-64 h-64 rounded-full opacity-[0.02]" style={{ background: 'white' }} />
-        {}
-        <div className="absolute inset-0 opacity-[0.03]" style={{
-          backgroundImage: 'radial-gradient(circle, white 1px, transparent 1px)',
-          backgroundSize: '32px 32px',
-        }} />
-        {}
-        <div className="relative z-10 flex flex-col items-center text-center px-12">
-          <div className="w-24 h-24 rounded-3xl bg-white/10 backdrop-blur-sm flex items-center justify-center mb-8 shadow-2xl border border-white/10">
-            <img src={logoUrl} alt="" className="w-16 h-16 object-contain" />
-          </div>
-          <h1 className="text-[36px] font-bold text-white leading-tight tracking-tight mb-3">
-            {shopName}
-          </h1>
-          <p className="text-[13px] font-medium text-white/40 tracking-[0.15em] uppercase mb-8">
-            {t('sidebar.managementSuite')}
-          </p>
-          <div className="w-12 h-[2px] rounded-full bg-white/15 mb-8" />
-          <p className="text-[15px] text-white/60 leading-relaxed max-w-[340px]">
-            {t('login.welcomeBack')}
-          </p>
-        </div>
-        {}
-        <div className="absolute bottom-8 left-0 right-0 flex justify-center">
-          <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10 backdrop-blur-sm">
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="text-[11px] text-white/40 font-medium">{t('login.systemReady')}</span>
-          </div>
-        </div>
+    <div
+      className="flex min-h-screen w-screen flex-col items-center justify-center gap-7 px-5 py-12"
+      style={{
+        backgroundColor: '#060a14',
+        backgroundImage:
+          'radial-gradient(900px 520px at 50% -120px, rgba(37,99,235,0.42), transparent 70%), radial-gradient(520px 340px at 85% 0, rgba(59,130,246,0.14), transparent 70%)',
+      }}
+    >
+      {/* Wordmark */}
+      <div className="animate-fade-up flex flex-col items-center gap-3 text-center">
+        <span className="flex h-14 w-14 items-center justify-center rounded-[16px] bg-[#faf8fd] p-2">
+          <img src={logoUrl} alt="" className="h-full w-full object-contain" />
+        </span>
+        <span dir="auto" className="text-[40px] font-semibold leading-[44px] tracking-[-0.05em] text-text-primary">
+          {shopName}<span className="text-[#3b82f6]">.</span>
+        </span>
+        <span className="eyebrow-accent">{t('sidebar.managementSuite')}</span>
       </div>
-      {}
-      <div className="flex-1 flex flex-col items-center justify-center px-8 lg:px-16 bg-card relative">
-        {}
-        <div className="lg:hidden flex flex-col items-center mb-10">
-          <div className="w-16 h-16 rounded-2xl bg-navy flex items-center justify-center mb-4 shadow-lg">
-            <img src={logoUrl} alt="" className="w-10 h-10 object-contain" />
-          </div>
-          <h1 className="text-[22px] font-bold text-text-primary">{shopName}</h1>
-          <p className="text-[11px] text-text-muted tracking-[0.1em] uppercase mt-1">{t('sidebar.managementSuite')}</p>
+
+      <form
+        onSubmit={handleSubmit}
+        className="animate-fade-up flex w-full max-w-[400px] flex-col gap-5 rounded-[20px] border border-border bg-card p-8"
+        style={{ boxShadow: 'inset 0 1px 0 rgba(250,248,253,0.06), var(--shadow-raised)' }}
+      >
+        <div className="flex flex-col gap-1.5">
+          <h1 className="text-[28px] font-semibold leading-8 tracking-[-0.03em] text-text-primary">
+            {needsSetup ? t('login.setupTitle') : t('login.heading')}<span className="text-[#3b82f6]">.</span>
+          </h1>
+          <p className="text-[14px] leading-[22px] text-text-secondary">
+            {needsSetup ? t('login.setupSubtitle') : t('login.subtitle')}
+          </p>
         </div>
-        <div className="w-full max-w-[380px]">
-          {}
-          <div className="mb-8">
-            <h2 className="text-[26px] font-bold text-text-primary leading-tight">
-              {t('login.title')}
-            </h2>
-            <p className="text-[14px] text-text-secondary mt-2">
-              {t('login.subtitle')}
-            </p>
+
+        {error && (
+          <div role="alert" className="flex items-start gap-2.5 rounded-[10px] bg-[rgba(255,77,106,0.14)] px-3.5 py-3 text-[13px] font-medium text-accent-red">
+            <span className="mt-px flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-[#ff4d6a] text-[10px] font-bold text-[#060a14]">!</span>
+            <span>{error}</span>
           </div>
-          {}
-          {error && (
-            <div className="mb-6 flex items-center gap-3 bg-red-50 text-accent-red text-[13px] font-medium rounded-xl px-4 py-3 border border-red-100">
-              <div className="w-5 h-5 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
-                <span className="text-[11px] font-bold">!</span>
-              </div>
-              {error}
-            </div>
+        )}
+
+        <Field id="login-user" label={t('login.username')} icon={<User size={16} />}>
+          <input
+            id="login-user"
+            type="text"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            className="form-input h-11 pl-10 text-[15px]"
+            placeholder={t('login.enterUsername')}
+            required
+            autoComplete="username"
+            autoFocus
+          />
+        </Field>
+
+        <Field id="login-pass" label={t('login.password')} icon={<Lock size={16} />}>
+          <input
+            id="login-pass"
+            type={showPassword ? 'text' : 'password'}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="form-input h-11 pl-10 pr-11 text-[15px]"
+            placeholder={t('login.enterPassword')}
+            required
+            autoComplete={needsSetup ? 'new-password' : 'current-password'}
+          />
+          <button
+            type="button"
+            onClick={() => setShowPassword(!showPassword)}
+            aria-label={showPassword ? t('profile.hidePassword') : t('profile.showPassword')}
+            className="absolute right-3 top-1/2 -translate-y-1/2 rounded-md p-1 text-text-muted transition-colors hover:text-text-primary"
+          >
+            {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+          </button>
+        </Field>
+
+        {needsSetup && (
+          <Field id="login-confirm" label={t('login.confirmPassword')} icon={<Lock size={16} />}>
+            <input
+              id="login-confirm"
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              className="form-input h-11 pl-10 text-[15px]"
+              required
+              autoComplete="new-password"
+            />
+          </Field>
+        )}
+
+        <button type="submit" disabled={submitDisabled} className="btn-primary group h-12 w-full text-[15px]">
+          {loading ? (
+            <>
+              <Loader2 size={18} className="animate-spin" />
+              {t('login.signingIn')}
+            </>
+          ) : (
+            <>
+              {needsSetup ? t('login.createAccount') : t('login.signIn')}
+              <ArrowRight size={16} className="transition-transform group-hover:translate-x-0.5" />
+            </>
           )}
-          {}
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div>
-              <label className="block text-[12px] font-semibold text-text-secondary mb-2 tracking-wide">
-                {t('login.username')}
-              </label>
-              <div className="relative">
-                <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted">
-                  <User size={16} />
-                </div>
-                <input
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 rounded-xl border border-border bg-surface text-[14px] text-text-primary placeholder:text-text-muted/60 focus:outline-none focus:ring-2 focus:ring-navy/15 focus:border-navy/30 transition-all"
-                  placeholder={t('login.enterUsername')}
-                  required
-                  autoComplete="username"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="block text-[12px] font-semibold text-text-secondary mb-2 tracking-wide">
-                {t('login.password')}
-              </label>
-              <div className="relative">
-                <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted">
-                  <Lock size={16} />
-                </div>
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-10 pr-12 py-3 rounded-xl border border-border bg-surface text-[14px] text-text-primary placeholder:text-text-muted/60 focus:outline-none focus:ring-2 focus:ring-navy/15 focus:border-navy/30 transition-all"
-                  placeholder={t('login.enterPassword')}
-                  required
-                  autoComplete="current-password"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-secondary transition-colors p-0.5"
-                >
-                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-            </div>
-            <button
-              type="submit"
-              disabled={loading || !username || !password}
-              className="w-full py-3.5 bg-navy text-white rounded-xl font-semibold text-[14px] hover:bg-navy-light disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2.5 group shadow-sm"
-            >
-              {loading ? (
-                <>
-                  <Loader2 size={18} className="animate-spin" />
-                  {t('login.signingIn')}
-                </>
-              ) : (
-                <>
-                  {t('login.signIn')}
-                  <ArrowRight size={16} className="group-hover:translate-x-0.5 transition-transform" />
-                </>
-              )}
-            </button>
-          </form>
-          {}
-          <div className="mt-10 pt-6 border-t border-border-light">
-            <p className="text-[11.5px] text-text-muted text-center">
-              {t('login.footerHint')}
-            </p>
-          </div>
-        </div>
+        </button>
+
+        <p className="text-center text-[12px] leading-[18px] text-text-muted">{t('login.footerHint')}</p>
+      </form>
+
+      <div className="flex h-8 items-center gap-2 rounded-full border border-border-light bg-[rgba(13,19,34,0.8)] px-3.5 text-[12px] text-text-secondary">
+        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-accent-green" />
+        {t('login.systemReady')}
+      </div>
+    </div>
+  );
+}
+
+function Field({ id, label, icon, children }: { id: string; label: string; icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={id} className="text-[13px] font-medium text-text-secondary">{label}</label>
+      <div className="relative">
+        <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted">{icon}</span>
+        {children}
       </div>
     </div>
   );
