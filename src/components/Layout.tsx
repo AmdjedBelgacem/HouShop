@@ -1,111 +1,162 @@
 import type { ReactNode } from 'react';
-import { useAuth } from '../hooks/useAuth';
+import { useAuth } from '../hooks/authContext';
 import { useI18n } from '../i18n';
-import { useBranding } from '../hooks/useBranding';
+import { useBranding } from '../hooks/brandingContext';
 import UpdateBanner from './UpdateBanner';
 import {
   LayoutGrid, ClipboardList, Clock, Users, ShoppingCart, Plus,
-  HelpCircle, LogOut, CalendarCheck, RotateCcw, Calculator,
+  LogOut, CalendarCheck, RotateCcw, Calculator, Smartphone,
+  ShieldCheck, Trash2, Settings,
 } from 'lucide-react';
-type Page = 'dashboard' | 'products' | 'product-evaluation' | 'add-product' | 'edit-product' | 'history' | 'customers' | 'add-customer' | 'edit-customer' | 'reservations' | 'returns' | 'pos' | 'profile' | 'logs';
+
+type Page = 'dashboard' | 'products' | 'product-evaluation' | 'add-product' | 'edit-product' | 'history' | 'customers' | 'add-customer' | 'edit-customer' | 'reservations' | 'returns' | 'pos' | 'transfer' | 'diagnostics' | 'wipe' | 'profile' | 'logs';
+
 interface LayoutProps {
   children: ReactNode;
   currentPage: Page;
   onNavigate: (page: Page) => void;
 }
-const navItemKeys: { id: Page; key: string; icon: ReactNode }[] = [
-  { id: 'dashboard', key: 'sidebar.dashboard', icon: <LayoutGrid size={18} strokeWidth={1.8} /> },
-  { id: 'products', key: 'sidebar.products', icon: <ClipboardList size={18} strokeWidth={1.8} /> },
-  { id: 'product-evaluation', key: 'sidebar.productEvaluation', icon: <Calculator size={18} strokeWidth={1.8} /> },
-  { id: 'history', key: 'sidebar.history', icon: <Clock size={18} strokeWidth={1.8} /> },
-  { id: 'customers', key: 'sidebar.customers', icon: <Users size={18} strokeWidth={1.8} /> },
-  { id: 'reservations', key: 'sidebar.reservations', icon: <CalendarCheck size={18} strokeWidth={1.8} /> },
-  { id: 'returns', key: 'sidebar.returns', icon: <RotateCcw size={18} strokeWidth={1.8} /> },
-  { id: 'pos', key: 'sidebar.checkout', icon: <ShoppingCart size={18} strokeWidth={1.8} /> },
+
+const ICON = { size: 18, strokeWidth: 1.8 } as const;
+
+interface NavItem { id: Page; key: string; icon: ReactNode }
+
+const navGroups: { key: string; items: NavItem[] }[] = [
+  {
+    key: 'sidebar.groupSell',
+    items: [
+      { id: 'dashboard', key: 'sidebar.dashboard', icon: <LayoutGrid {...ICON} /> },
+      { id: 'pos', key: 'sidebar.checkout', icon: <ShoppingCart {...ICON} /> },
+      { id: 'history', key: 'sidebar.history', icon: <Clock {...ICON} /> },
+      { id: 'returns', key: 'sidebar.returns', icon: <RotateCcw {...ICON} /> },
+      { id: 'reservations', key: 'sidebar.reservations', icon: <CalendarCheck {...ICON} /> },
+      { id: 'customers', key: 'sidebar.customers', icon: <Users {...ICON} /> },
+    ],
+  },
+  {
+    key: 'sidebar.groupStock',
+    items: [
+      { id: 'products', key: 'sidebar.products', icon: <ClipboardList {...ICON} /> },
+      { id: 'product-evaluation', key: 'sidebar.productEvaluation', icon: <Calculator {...ICON} /> },
+    ],
+  },
+  {
+    key: 'sidebar.groupDevices',
+    items: [
+      { id: 'diagnostics', key: 'sidebar.diagnostics', icon: <ShieldCheck {...ICON} /> },
+      { id: 'transfer', key: 'sidebar.dataTransfer', icon: <Smartphone {...ICON} /> },
+      { id: 'wipe', key: 'sidebar.phoneWipe', icon: <Trash2 {...ICON} /> },
+    ],
+  },
 ];
+
+const itemBase =
+  'flex w-full items-center gap-3 h-10 rounded-full px-3 text-left text-[14px] font-medium transition-colors duration-150';
+const itemOn = 'bg-[rgba(250,248,253,0.11)] text-text-primary';
+const itemOff = 'text-text-secondary hover:bg-[rgba(250,248,253,0.04)] hover:text-text-primary';
+
 export default function Layout({ children, currentPage, onNavigate }: LayoutProps) {
   const { user, logout } = useAuth();
   const { t } = useI18n();
   const { logoUrl, shopName } = useBranding();
+
   const displayName = user?.username
-    ? `${user.username.charAt(0).toUpperCase()}${user.username.slice(1)} Hou`
-    : 'Admin Hou';
+    ? `${user.username.charAt(0).toUpperCase()}${user.username.slice(1)}`
+    : 'Admin';
+
+  const isActive = (id: Page) =>
+    currentPage === id ||
+    (id === 'products' && (currentPage === 'add-product' || currentPage === 'edit-product')) ||
+    (id === 'customers' && (currentPage === 'add-customer' || currentPage === 'edit-customer')) ||
+    (id === 'dashboard' && currentPage === 'logs');
+
+  const settingsActive = currentPage === 'profile';
+
   return (
-    <div className="flex h-screen overflow-hidden bg-surface">
-      {}
-      <aside className="fixed left-4 top-4 bottom-4 w-[232px] bg-card rounded-2xl border border-border flex flex-col z-50"
-        style={{ boxShadow: '0 4px 24px rgba(0,0,0,0.06), 0 1px 4px rgba(0,0,0,0.04)' }}>
-        {}
-        <div className="px-5 pt-5 pb-4 flex items-center gap-3">
-          <img src={logoUrl} alt={shopName} className="h-11 w-auto object-contain flex-shrink-0" />
-          <div>
-            <h1 className="text-[15px] font-bold text-text-primary leading-tight tracking-tight">
-              {shopName}
-            </h1>
-            <p className="text-[10.5px] font-medium text-text-muted tracking-[0.03em]">
+    <div className="flex h-screen overflow-hidden">
+      {/* Navigation rail */}
+      <aside className="fixed inset-y-0 start-0 z-50 flex w-[248px] flex-col gap-7 overflow-y-auto border-e border-border-light bg-sidebar px-4 pb-6 pt-7">
+        {/* Wordmark */}
+        <button
+          onClick={() => onNavigate('dashboard')}
+          className="flex items-center gap-3 rounded-xl px-3 text-left"
+        >
+          {/* Logos are often dark artwork: a light tile keeps them visible on the dark rail. */}
+          <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] bg-[#faf8fd] p-1">
+            <img src={logoUrl} alt="" className="h-full w-full object-contain" />
+          </span>
+          <span className="flex min-w-0 flex-col gap-1">
+            <span dir="auto" className="line-clamp-2 break-words text-[18px] font-semibold leading-[22px] tracking-[-0.03em] text-text-primary">
+              {shopName}<span className="text-[#3b82f6]">.</span>
+            </span>
+            <span className="truncate font-mono text-[11px] font-semibold uppercase leading-[15px] tracking-[0.06em] text-text-muted">
               {t('sidebar.managementSuite')}
-            </p>
-          </div>
-        </div>
-        {}
-        <nav className="flex-1 px-3 space-y-0.5 overflow-y-auto">
-          {navItemKeys.map((item) => {
-            const active = currentPage === item.id || (item.id === 'products' && (currentPage === 'add-product' || currentPage === 'edit-product')) || (item.id === 'customers' && (currentPage === 'add-customer' || currentPage === 'edit-customer'));
-            return (
-              <button
-                key={item.id}
-                onClick={() => onNavigate(item.id)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13px] transition-colors ${
-                  active
-                    ? 'bg-navy/10 text-navy font-semibold'
-                    : 'text-text-secondary font-normal hover:bg-surface hover:text-text-primary'
-                }`}
-              >
-                <span className={active ? 'text-navy' : 'text-text-muted'}>{item.icon}</span>
-                {t(item.key)}
-              </button>
-            );
-          })}
+            </span>
+          </span>
+        </button>
+
+        {/* The one primary action */}
+        <button onClick={() => onNavigate('pos')} className="btn-primary mx-1">
+          <Plus size={16} strokeWidth={2.2} />
+          {t('sidebar.newSale')}
+        </button>
+
+        {/* Groups */}
+        <nav aria-label={t('sidebar.managementSuite')} className="flex flex-1 flex-col gap-6">
+          {navGroups.map((group) => (
+            <div key={group.key} className="flex flex-col gap-0.5">
+              <span className="px-3 pb-1.5 font-mono text-[11px] font-semibold uppercase leading-[15px] tracking-[0.06em] text-text-muted">
+                {t(group.key)}
+              </span>
+              {group.items.map((item) => {
+                const active = isActive(item.id);
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => onNavigate(item.id)}
+                    aria-current={active ? 'page' : undefined}
+                    className={`${itemBase} ${active ? itemOn : itemOff}`}
+                  >
+                    <span className={`flex-shrink-0 ${active ? 'text-[#93c5fd]' : 'text-text-muted'}`}>{item.icon}</span>
+                    <span className="truncate">{t(item.key)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ))}
         </nav>
-        {}
-        <div className="px-3 pb-3 space-y-0.5 border-t border-border pt-3">
+
+        {/* Footer */}
+        <div className="flex flex-col gap-0.5 border-t border-border-light pt-4">
           <button
-            onClick={() => onNavigate('add-product')}
-            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-[13px] font-medium bg-navy text-white hover:bg-navy-light transition-colors"
+            onClick={() => onNavigate('profile')}
+            aria-current={settingsActive ? 'page' : undefined}
+            className={`${itemBase} ${settingsActive ? itemOn : itemOff}`}
           >
-            <Plus size={16} strokeWidth={2} />
-            {t('sidebar.newEntry')}
+            <Settings {...ICON} className={settingsActive ? 'text-[#93c5fd]' : 'text-text-muted'} />
+            {t('sidebar.settings')}
           </button>
-          <button className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] text-text-secondary hover:bg-surface transition-colors">
-            <HelpCircle size={16} strokeWidth={1.8} />
-            {t('sidebar.support')}
-          </button>
-          <button
-            onClick={logout}
-            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] text-accent-red hover:bg-accent-red/5 transition-colors"
-          >
-            <LogOut size={16} strokeWidth={1.8} />
+          <button onClick={logout} className={`${itemBase} ${itemOff}`}>
+            <LogOut {...ICON} className="text-text-muted" />
             {t('sidebar.logout')}
           </button>
-        </div>
-        {}
-        <div className="px-4 py-3.5 border-t border-border rounded-b-2xl bg-surface/50">
-          <div className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => onNavigate('profile')}>
-            <div className="w-8 h-8 rounded-full bg-navy flex items-center justify-center flex-shrink-0 overflow-hidden">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                <circle cx="12" cy="7" r="4"/>
-              </svg>
-            </div>
-            <div className="min-w-0">
-              <p className="text-[12.5px] font-semibold text-text-primary truncate">{displayName}</p>
-              <p className="text-[11px] text-text-muted leading-tight">{t('sidebar.premiumTier')}</p>
-            </div>
+          <div className="mt-3 flex items-center gap-3 rounded-[14px] bg-[rgba(250,248,253,0.04)] px-3 py-2.5">
+            <span
+              aria-hidden="true"
+              className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[rgba(59,130,246,0.14)] text-[14px] font-semibold text-[#93c5fd]"
+            >
+              {displayName.charAt(0)}
+            </span>
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="truncate text-[14px] font-semibold leading-[18px] text-text-primary">{displayName}</span>
+              <span className="truncate text-[12px] leading-4 text-text-muted">{t('sidebar.ownerDevice')}</span>
+            </span>
           </div>
         </div>
       </aside>
-      {}
-      <main className="flex-1 overflow-y-auto ml-[260px]">
+
+      {/* Content */}
+      <main className="ms-[248px] flex-1 overflow-y-auto">
         <UpdateBanner />
         {children}
       </main>

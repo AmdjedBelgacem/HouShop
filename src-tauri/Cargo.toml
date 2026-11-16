@@ -7,7 +7,7 @@ edition = "2021"
 
 [lib]
 name = "shop_management_app_lib"
-crate-type = ["lib", "cdylib", "staticlib"]
+crate-type = ["lib", "cdylib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -24,6 +24,10 @@ bcrypt = "0.16"
 base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
 thiserror = "2"
+sha2 = "0.10"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+axum = { version = "0.7", features = ["multipart", "ws"] }
+tower-http = { version = "0.5", features = ["cors"] }
 
 [features]
 default = ["custom-protocol"]
@@ -42,3 +46,6 @@ windows-sys = { version = "0.59", features = [
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Printing",
 ] }
+
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }

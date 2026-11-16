@@ -1,12 +1,11 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from 'react';
+import { BrandingContext } from './brandingContext';
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Image as TauriImage } from '@tauri-apps/api/image';
@@ -20,27 +19,6 @@ import defaultLogo from '../assets/logo.png';
 export const SHOP_LOGO_CACHE_KEY = 'shop_logo_data_url';
 export const SHOP_NAME_CACHE_KEY = 'shop_name';
 export const DEFAULT_SHOP_NAME = 'HouPhone Shop';
-
-interface BrandingContextValue {
-  /** URL suitable for <img src> (bundled default or convertFileSrc of custom logo). */
-  logoUrl: string;
-  /** Absolute filesystem path of the custom logo, or null when using the default. */
-  logoPath: string | null;
-  /** True while the initial logo is loading from disk. */
-  loading: boolean;
-  /** The shop name displayed across the UI and OS window title. */
-  shopName: string;
-  /** Persist a logo from a data URL (or raw base64) and refresh UI + window icon. */
-  saveLogo: (dataUrl: string, filename?: string) => Promise<void>;
-  /** Remove the custom logo and restore the bundled default. */
-  resetLogo: () => Promise<void>;
-  /** Persist the shop name and refresh the UI + OS window title. */
-  saveShopName: (name: string) => Promise<void>;
-  /** Remove the custom shop name and restore the default. */
-  resetShopName: () => Promise<void>;
-}
-
-const BrandingContext = createContext<BrandingContextValue | null>(null);
 
 /** Update the browser/tab favicon so it matches the active logo. */
 function setDocumentFavicon(href: string) {
@@ -230,10 +208,10 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         if (name) {
           setShopName(name);
-          try { localStorage.setItem(SHOP_NAME_CACHE_KEY, name); } catch {}
+          try { localStorage.setItem(SHOP_NAME_CACHE_KEY, name); } catch { /* storage may be unavailable: ignore */ }
         } else {
           setShopName(DEFAULT_SHOP_NAME);
-          try { localStorage.removeItem(SHOP_NAME_CACHE_KEY); } catch {}
+          try { localStorage.removeItem(SHOP_NAME_CACHE_KEY); } catch { /* storage may be unavailable: ignore */ }
         }
       } catch {
         // Keep default on error.
@@ -271,27 +249,27 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
     await invoke('save_app_shop_name', { name: trimmed });
     if (trimmed) {
       setShopName(trimmed);
-      try { localStorage.setItem(SHOP_NAME_CACHE_KEY, trimmed); } catch {}
+      try { localStorage.setItem(SHOP_NAME_CACHE_KEY, trimmed); } catch { /* storage may be unavailable: ignore */ }
     } else {
       setShopName(DEFAULT_SHOP_NAME);
-      try { localStorage.removeItem(SHOP_NAME_CACHE_KEY); } catch {}
+      try { localStorage.removeItem(SHOP_NAME_CACHE_KEY); } catch { /* storage may be unavailable: ignore */ }
     }
     // Keep the OS window + browser tab title in sync.
     try {
       await getCurrentWindow().setTitle(
         trimmed ? `${trimmed} - POS & Inventory` : 'Shop Management - POS & Inventory',
       );
-    } catch {}
+    } catch { /* window title is cosmetic: ignore */ }
     document.title = trimmed || DEFAULT_SHOP_NAME;
   }, []);
 
   const resetShopName = useCallback(async () => {
     await invoke('clear_app_shop_name');
     setShopName(DEFAULT_SHOP_NAME);
-    try { localStorage.removeItem(SHOP_NAME_CACHE_KEY); } catch {}
+    try { localStorage.removeItem(SHOP_NAME_CACHE_KEY); } catch { /* storage may be unavailable: ignore */ }
     try {
       await getCurrentWindow().setTitle('Shop Management - POS & Inventory');
-    } catch {}
+    } catch { /* window title is cosmetic: ignore */ }
     document.title = DEFAULT_SHOP_NAME;
   }, []);
 
@@ -303,12 +281,4 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
   return (
     <BrandingContext.Provider value={value}>{children}</BrandingContext.Provider>
   );
-}
-
-export function useBranding(): BrandingContextValue {
-  const ctx = useContext(BrandingContext);
-  if (!ctx) {
-    throw new Error('useBranding must be used within BrandingProvider');
-  }
-  return ctx;
 }

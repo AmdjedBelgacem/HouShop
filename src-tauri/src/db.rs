@@ -112,6 +112,118 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), String> {
     let _ = sqlx::query(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_variants_sku ON product_variants(sku) WHERE sku IS NOT NULL"
     ).execute(pool).await;
+
+    // --- HouSwitch: Phone Data Transfer Module tables
+    let _ = sqlx::query(
+        "CREATE TABLE IF NOT EXISTS transfer_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_uuid TEXT NOT NULL UNIQUE,
+            source_device_id TEXT NOT NULL,
+            source_device_name TEXT NOT NULL,
+            source_platform TEXT NOT NULL,
+            target_device_id TEXT NOT NULL,
+            target_device_name TEXT NOT NULL,
+            target_platform TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            total_items INTEGER NOT NULL DEFAULT 0,
+            transferred_items INTEGER NOT NULL DEFAULT 0,
+            total_bytes INTEGER NOT NULL DEFAULT 0,
+            transferred_bytes INTEGER NOT NULL DEFAULT 0,
+            selected_categories TEXT NOT NULL DEFAULT '[]',
+            error_message TEXT,
+            started_at TEXT NOT NULL DEFAULT (datetime('now')),
+            completed_at TEXT
+        )"
+    ).execute(pool).await;
+
+    let _ = sqlx::query(
+        "CREATE TABLE IF NOT EXISTS transfer_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id INTEGER NOT NULL,
+            category TEXT NOT NULL,
+            item_name TEXT NOT NULL,
+            item_size INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'pending',
+            error_message TEXT,
+            checksum TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (session_id) REFERENCES transfer_sessions(id) ON DELETE CASCADE
+        )"
+    ).execute(pool).await;
+
+    let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_transfer_sessions_status ON transfer_sessions(status)").execute(pool).await;
+    let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_transfer_sessions_created ON transfer_sessions(started_at)").execute(pool).await;
+    let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_transfer_logs_session ON transfer_logs(session_id)").execute(pool).await;
+
+    // --- HouCheck: Universal Phone Diagnostic & Hardware Inspection tables
+    let _ = sqlx::query(
+        "CREATE TABLE IF NOT EXISTS device_inspections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            inspection_uuid TEXT NOT NULL UNIQUE,
+            device_id TEXT NOT NULL,
+            device_name TEXT NOT NULL,
+            brand TEXT NOT NULL,
+            model TEXT NOT NULL,
+            platform TEXT NOT NULL,
+            os_version TEXT NOT NULL,
+            imei1 TEXT,
+            imei2 TEXT,
+            serial_number TEXT,
+            battery_health INTEGER NOT NULL DEFAULT 100,
+            battery_cycles INTEGER NOT NULL DEFAULT 0,
+            battery_design_mah INTEGER NOT NULL DEFAULT 0,
+            battery_actual_mah INTEGER NOT NULL DEFAULT 0,
+            parts_audit JSON NOT NULL DEFAULT '{}',
+            hardware_tests JSON NOT NULL DEFAULT '{}',
+            score INTEGER NOT NULL DEFAULT 100,
+            calculated_grade TEXT NOT NULL DEFAULT 'A+',
+            passed_tests_count INTEGER NOT NULL DEFAULT 0,
+            total_tests_count INTEGER NOT NULL DEFAULT 28,
+            lock_status JSON NOT NULL DEFAULT '{}',
+            technician_notes TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )"
+    ).execute(pool).await;
+
+    let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_device_inspections_uuid ON device_inspections(inspection_uuid)").execute(pool).await;
+    let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_device_inspections_imei ON device_inspections(imei1)").execute(pool).await;
+    let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_device_inspections_created ON device_inspections(created_at)").execute(pool).await;
+    let _ = sqlx::query("ALTER TABLE product_variants ADD COLUMN inspection_id INTEGER").execute(pool).await;
+
+    // --- HouWipe: Universal Phone Sanitization, Account Removal & Secure Wipe System
+    let _ = sqlx::query(
+        "CREATE TABLE IF NOT EXISTS sanitization_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            wipe_uuid TEXT NOT NULL UNIQUE,
+            device_id TEXT NOT NULL,
+            device_name TEXT NOT NULL,
+            brand TEXT NOT NULL,
+            model TEXT NOT NULL,
+            platform TEXT NOT NULL,
+            os_version TEXT NOT NULL,
+            imei TEXT,
+            imei2 TEXT,
+            serial_number TEXT,
+            storage_capacity TEXT,
+            wipe_method TEXT NOT NULL,
+            nist_standard TEXT NOT NULL DEFAULT 'NIST SP 800-88 Rev. 1 Purge',
+            pre_wipe_accounts_removed BOOLEAN NOT NULL DEFAULT 1,
+            pre_wipe_lock_audit JSON NOT NULL DEFAULT '{}',
+            post_wipe_oobe_verified BOOLEAN NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'completed',
+            technician_name TEXT NOT NULL,
+            notes TEXT,
+            duration_seconds INTEGER NOT NULL DEFAULT 0,
+            certificate_number TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )"
+    ).execute(pool).await;
+
+    let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_sanitization_uuid ON sanitization_records(wipe_uuid)").execute(pool).await;
+    let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_sanitization_imei ON sanitization_records(imei)").execute(pool).await;
+    let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_sanitization_cert ON sanitization_records(certificate_number)").execute(pool).await;
+    let _ = sqlx::query("CREATE INDEX IF NOT EXISTS idx_sanitization_created ON sanitization_records(created_at)").execute(pool).await;
+    let _ = sqlx::query("ALTER TABLE product_variants ADD COLUMN sanitization_id INTEGER").execute(pool).await;
     // Backfill: any legacy product that has no variants yet gets a single
     // "Default" variant cloned from the product's own (now-dormant) columns, so
     // it remains sellable after the model change. Idempotent — only touches
@@ -127,23 +239,17 @@ async fn run_migrations(pool: &SqlitePool) -> Result<(), String> {
         .map_err(|e| format!("Failed to enable foreign keys: {}", e))?;
     Ok(())
 }
+/// Seeds starter categories and sample products into a brand-new database.
+/// No user account is created here. The first administrator is created on the setup
+/// screen (`create_initial_admin`), so no default password ships with the app.
 async fn seed_if_empty(pool: &SqlitePool) -> Result<(), String> {
-    let user_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
+    let category_count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM categories")
         .fetch_one(pool)
         .await
-        .map_err(|e| format!("Failed to count users: {}", e))?;
-    if user_count.0 > 0 {
+        .map_err(|e| format!("Failed to count categories: {}", e))?;
+    if category_count.0 > 0 {
         return Ok(());
     }
-    let password_hash =
-        bcrypt::hash("admin123", 4).map_err(|e| format!("Bcrypt error: {}", e))?;
-    sqlx::query("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)")
-        .bind("admin")
-        .bind(&password_hash)
-        .bind("admin")
-        .execute(pool)
-        .await
-        .map_err(|e| format!("Failed to seed admin user: {}", e))?;
     let categories = vec![
         "Smartphones",
         "Tablets",
@@ -304,4 +410,26 @@ pub fn get_branding_dir(app: &AppHandle) -> Result<PathBuf, String> {
     fs::create_dir_all(&branding_dir)
         .map_err(|e| format!("Failed to create branding dir: {}", e))?;
     Ok(branding_dir)
+}
+
+/// Base staging directory for phone data transfers under `<app_data>/transfers/`.
+pub fn get_transfers_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let app_data = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+    let transfers_dir = app_data.join("transfers");
+    fs::create_dir_all(&transfers_dir)
+        .map_err(|e| format!("Failed to create transfers dir: {}", e))?;
+    Ok(transfers_dir)
+}
+
+/// Session-specific scratch directory `<app_data>/transfers/temp/<session_uuid>/`.
+#[allow(dead_code)]
+pub fn get_transfers_temp_dir(app: &AppHandle, session_uuid: &str) -> Result<PathBuf, String> {
+    let base = get_transfers_dir(app)?;
+    let session_dir = base.join("temp").join(session_uuid);
+    fs::create_dir_all(&session_dir)
+        .map_err(|e| format!("Failed to create session temp dir: {}", e))?;
+    Ok(session_dir)
 }

@@ -1,19 +1,19 @@
-import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
-export type Language = 'en' | 'ar' | 'fr';
-interface I18nContextType {
-  lang: Language;
-  setLang: (lang: Language) => void;
-  t: (key: string, params?: Record<string, string | number>) => string;
-  isRTL: boolean;
-}
-const I18nContext = createContext<I18nContextType | undefined>(undefined);
+import { useState, useEffect, type ReactNode } from 'react';
+import { I18nContext, type Language } from './i18nContext';
 import { translations } from './translations';
+
+export type { Language };
+
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [lang, setLangState] = useState<Language>(() => {
     const saved = localStorage.getItem('shop_language');
-    return (saved === 'ar' || saved === 'fr') ? saved : 'en';
+    const initial: Language = (saved === 'ar' || saved === 'fr') ? saved : 'en';
+    // Set synchronously so uiLocale() is right during the very first render.
+    document.documentElement.lang = initial;
+    return initial;
   });
   const setLang = (newLang: Language) => {
+    document.documentElement.lang = newLang;
     setLangState(newLang);
     localStorage.setItem('shop_language', newLang);
   };
@@ -24,7 +24,11 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   }, [lang, isRTL]);
   const t = (key: string, params?: Record<string, string | number>): string => {
     const dict = translations[lang] || translations.en;
-    let text = dict[key] || translations.en[key] || key;
+    // Plural forms: `key_one`, `key_few`, … chosen by Intl.PluralRules,
+    // falling back to the plain key when a form isn't defined.
+    const count = params?.count;
+    const form = typeof count === 'number' ? `${key}_${new Intl.PluralRules(lang).select(count)}` : null;
+    let text = (form && dict[form]) || dict[key] || translations.en[key] || key;
     if (params) {
       Object.entries(params).forEach(([k, v]) => {
         text = text.replace(`{${k}}`, String(v));
@@ -37,11 +41,4 @@ export function I18nProvider({ children }: { children: ReactNode }) {
       {children}
     </I18nContext.Provider>
   );
-}
-export function useI18n() {
-  const context = useContext(I18nContext);
-  if (!context) {
-    throw new Error('useI18n must be used within an I18nProvider');
-  }
-  return context;
 }

@@ -6,17 +6,21 @@ import { useI18n } from '../i18n';
 import type { CreateCustomer, UpdateCustomer, CustomerWithStats } from '../lib/types';
 import CustomSelect from '../components/CustomSelect';
 import {
-  ArrowLeft, User, MapPin, Settings, Camera, Calendar, ChevronDown,
+  ArrowLeft, User, MapPin, Settings, Camera, Calendar,
 } from 'lucide-react';
+
 interface AddCustomerProps {
   onBack: () => void;
   editCustomer?: CustomerWithStats | null;
 }
+
 export default function AddCustomer({ onBack, editCustomer }: AddCustomerProps) {
   const isEditing = !!editCustomer;
   const queryClient = useQueryClient();
   const { t } = useI18n();
+
   const addressParts = editCustomer?.address?.split(', ') ?? [];
+
   const algerianCities = [
     'Algiers', 'Oran', 'Constantine', 'Annaba', 'Blida', 'Batna', 'Sétif', 'Djelfa',
     'Biskra', 'Tlemcen', 'Béjaïa', 'Tizi Ouzou', 'Chlef', 'Médéa', 'Mostaganem',
@@ -35,11 +39,12 @@ export default function AddCustomer({ onBack, editCustomer }: AddCustomerProps) 
     { value: 'China', label: 'China' },
   ];
   const groupOptions = [
-    { value: 'Regular', label: 'Regular' },
-    { value: 'VIP', label: 'VIP' },
-    { value: 'Wholesale', label: 'Wholesale' },
-    { value: 'Staff', label: 'Staff' },
+    { value: 'Regular', label: t('addCustomer.groupRegular') },
+    { value: 'VIP', label: t('addCustomer.groupVip') },
+    { value: 'Wholesale', label: t('addCustomer.groupWholesale') },
+    { value: 'Staff', label: t('addCustomer.groupStaff') },
   ];
+
   const [form, setForm] = useState({
     name: editCustomer?.name ?? '',
     email: editCustomer?.email ?? '',
@@ -54,6 +59,7 @@ export default function AddCustomer({ onBack, editCustomer }: AddCustomerProps) 
     notes: editCustomer?.notes ?? '',
     photo_path: editCustomer?.photo_path ?? null,
   });
+
   const createMutation = useMutation({
     mutationFn: (data: CreateCustomer) => invoke('create_customer', { data }),
     onSuccess: () => {
@@ -66,6 +72,7 @@ export default function AddCustomer({ onBack, editCustomer }: AddCustomerProps) 
     },
     onError: () => toast.error(t('toast.error')),
   });
+
   const updateMutation = useMutation({
     mutationFn: (data: UpdateCustomer) => invoke('update_customer', { data }),
     onSuccess: () => {
@@ -78,6 +85,7 @@ export default function AddCustomer({ onBack, editCustomer }: AddCustomerProps) 
     },
     onError: () => toast.error(t('toast.error')),
   });
+
   const handleSubmit = () => {
     const fullAddress = [form.address, form.city, form.country, form.postal_code]
       .filter(Boolean).join(', ');
@@ -96,6 +104,7 @@ export default function AddCustomer({ onBack, editCustomer }: AddCustomerProps) 
       createMutation.mutate(payload);
     }
   };
+
   const handlePhotoSelect = async () => {
     const input = document.createElement('input');
     input.type = 'file'; input.accept = 'image/*';
@@ -106,6 +115,7 @@ export default function AddCustomer({ onBack, editCustomer }: AddCustomerProps) 
     };
     input.click();
   };
+
   const processImageFile = async (file: File) => {
     const reader = new FileReader();
     reader.onload = async () => {
@@ -116,10 +126,12 @@ export default function AddCustomer({ onBack, editCustomer }: AddCustomerProps) 
     };
     reader.readAsDataURL(file);
   };
+
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
   };
+
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -131,180 +143,193 @@ export default function AddCustomer({ onBack, editCustomer }: AddCustomerProps) 
       }
     }
   };
+
   return (
     <div className="p-8">
-      {}
-      <div className="flex items-start justify-between mb-8">
-        <div>
-          <div className="flex items-center gap-3 mb-1">
-            <button onClick={onBack} className="p-1.5 rounded-lg hover:bg-card border border-transparent hover:border-border transition-colors">
-              <ArrowLeft size={20} />
-            </button>
-            <h2 className="text-[26px] font-bold text-text-primary leading-tight">{isEditing ? t('addCustomer.editTitle') : t('addCustomer.title')}</h2>
+      <div className="animate-fade-up">
+        {/* Header */}
+        <div className="flex flex-wrap items-end justify-between gap-4 mb-8">
+          <div>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={onBack} aria-label={t('common.back')} title={t('common.back')}
+                className="p-1.5 rounded-lg text-text-secondary hover:bg-surface transition-colors">
+                <ArrowLeft size={20} />
+              </button>
+              <span className="eyebrow-accent mb-3 flex w-fit">{t('sidebar.groupSell')}</span>
+              <h2 className="page-title">{isEditing ? t('addCustomer.editTitle') : t('addCustomer.title')}</h2>
+            </div>
+            <p className="page-subtitle ml-11">
+              {isEditing ? t('addCustomer.editSubtitle') : t('addCustomer.newSubtitle')}
+            </p>
           </div>
-          <p className="text-[14px] text-text-secondary ml-11">
-            {isEditing ? t('addCustomer.editSubtitle') : t('addCustomer.newSubtitle')}
-          </p>
+          <div className="flex items-center gap-2.5">
+            <button type="button" onClick={onBack} className="btn-secondary">
+              {t('common.cancel')}
+            </button>
+            <button type="button" onClick={handleSubmit} disabled={!form.name || createMutation.isPending} className="btn-primary">
+              {createMutation.isPending || updateMutation.isPending ? t('addCustomer.saving') : (isEditing ? t('addCustomer.saveChanges') : t('addCustomer.saveCustomer'))}
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-2.5">
-          <button onClick={onBack}
-            className="px-5 py-2.5 rounded-lg border border-border text-[13px] font-medium text-text-secondary hover:bg-card transition-colors">
-            {t('common.cancel')}
-          </button>
-          <button onClick={handleSubmit} disabled={!form.name || createMutation.isPending}
-            className="px-6 py-2.5 rounded-lg bg-navy text-white text-[13px] font-medium hover:bg-navy-light disabled:opacity-50 transition-colors">
-            {createMutation.isPending || updateMutation.isPending ? t('addCustomer.saving') : (isEditing ? t('addCustomer.saveChanges') : t('addCustomer.saveCustomer'))}
-          </button>
-        </div>
-      </div>
-      {}
-      <div className="grid grid-cols-3 gap-6">
-        {}
-        <div className="col-span-2 space-y-6">
-          {}
-          <section className="card p-6">
-            <div className="flex items-center gap-2 mb-5">
-              <User size={16} className="text-text-muted" />
-              <h3 className="text-[15px] font-bold text-text-primary">{t('addCustomer.personalInfo')}</h3>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <Field label={t('addCustomer.nameLabel')} required>
-                <input type="text" required value={form.name}
-                  onChange={(e) => setForm(f => ({ ...f, name: e.target.value }))}
-                  className="form-input" placeholder={t('addCustomer.fullNamePh')} />
-              </Field>
-              <Field label={t('addCustomer.emailLabel')}>
-                <input type="email" value={form.email}
-                  onChange={(e) => setForm(f => ({ ...f, email: e.target.value }))}
-                  className="form-input" placeholder="j.doe@example.com" />
-              </Field>
-              <Field label={t('addCustomer.phoneLabel')}>
-                <input type="text" value={form.phone}
-                  onChange={(e) => setForm(f => ({ ...f, phone: e.target.value }))}
-                  className="form-input" placeholder="+1 (555) 000-0000" />
-              </Field>
-              <Field label={t('addCustomer.dobLabel')}>
-                <div className="relative">
-                  <input type="text" value={form.dob}
-                    onChange={(e) => setForm(f => ({ ...f, dob: e.target.value }))}
-                    className="form-input pr-10" placeholder={t('addCustomer.dobFormat')} />
-                  <Calendar size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted" />
-                </div>
-              </Field>
-            </div>
-          </section>
-          {}
-          <section className="card p-6">
-            <div className="flex items-center gap-2 mb-5">
-              <MapPin size={16} className="text-text-muted" />
-              <h3 className="text-[15px] font-bold text-text-primary">{t('addCustomer.shippingBilling')}</h3>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="col-span-2">
-                <Field label={t('addCustomer.streetAddress')}>
-                  <input type="text" value={form.address}
-                    onChange={(e) => setForm(f => ({ ...f, address: e.target.value }))}
-                    className="form-input" placeholder={t('addCustomer.streetPh')} />
+
+        <div className="grid grid-cols-3 gap-6">
+          {/* Main column */}
+          <div className="col-span-2 space-y-6">
+            {/* Personal information */}
+            <section className="card p-6">
+              <div className="flex items-center gap-2 mb-5">
+                <User size={16} className="text-text-muted" />
+                <h3 className="text-[15px] font-semibold text-text-primary">{t('addCustomer.personalInfo')}</h3>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <Field label={t('addCustomer.nameLabel')} required>
+                  <input type="text" required value={form.name}
+                    onChange={(e) => setForm(f => ({ ...f, name: e.target.value }))}
+                    className="form-input" placeholder={t('addCustomer.fullNamePh')} />
+                </Field>
+                <Field label={t('addCustomer.emailLabel')}>
+                  <input type="email" value={form.email}
+                    onChange={(e) => setForm(f => ({ ...f, email: e.target.value }))}
+                    className="form-input" placeholder="j.doe@example.com" />
+                </Field>
+                <Field label={t('addCustomer.phoneLabel')}>
+                  <input type="text" value={form.phone}
+                    onChange={(e) => setForm(f => ({ ...f, phone: e.target.value }))}
+                    className="form-input" placeholder="+1 (555) 000-0000" />
+                </Field>
+                <Field label={t('addCustomer.dobLabel')}>
+                  <div className="relative">
+                    <input type="text" value={form.dob}
+                      onChange={(e) => setForm(f => ({ ...f, dob: e.target.value }))}
+                      className="form-input pr-10" placeholder={t('addCustomer.dobFormat')} />
+                    <Calendar size={15} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+                  </div>
                 </Field>
               </div>
-              <Field label={t('addCustomer.city')}>
-                <CustomSelect
-                  value={form.city}
-                  onChange={(v) => setForm(f => ({ ...f, city: v }))}
-                  options={[{ value: '', label: t('addCustomer.selectCity') }, ...algerianCities.map(c => ({ value: c, label: c }))]}
-                  placeholder={t('addCustomer.selectCity')}
-                />
-              </Field>
-              <Field label={t('addCustomer.country')}>
-                <CustomSelect
-                  value={form.country}
-                  onChange={(v) => setForm(f => ({ ...f, country: v }))}
-                  options={countryOptions}
-                  placeholder={t('addCustomer.selectCountry')}
-                />
-              </Field>
-              <Field label={t('addCustomer.postalCode')}>
-                <input type="text" value={form.postal_code}
-                  onChange={(e) => setForm(f => ({ ...f, postal_code: e.target.value }))}
-                  className="form-input" placeholder={t('addCustomer.postalPh')} />
-              </Field>
-            </div>
-          </section>
-        </div>
-        {}
-        <div className="space-y-6">
-          {}
-          <section className="card p-6 flex flex-col items-center text-center">
-            <div className="relative mb-3">
-              <div
-                className="w-24 h-24 rounded-full bg-surface border-2 border-border flex items-center justify-center overflow-hidden cursor-pointer hover:border-navy/30 transition-colors"
-                onClick={handlePhotoSelect}
-                onDragOver={handleDragOver}
-                onDrop={handleDrop}
-              >
-                {form.photo_path ? (
-                  <img src={convertFileSrc(form.photo_path)} alt="Customer" className="w-full h-full object-cover" />
-                ) : (
-                  <User size={36} className="text-text-muted" />
-                )}
+            </section>
+
+            {/* Shipping & billing */}
+            <section className="card p-6">
+              <div className="flex items-center gap-2 mb-5">
+                <MapPin size={16} className="text-text-muted" />
+                <h3 className="text-[15px] font-semibold text-text-primary">{t('addCustomer.shippingBilling')}</h3>
               </div>
-              <button onClick={handlePhotoSelect}
-                className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-navy text-white flex items-center justify-center shadow-lg hover:bg-navy-light transition-colors">
-                <Camera size={14} />
-              </button>
-            </div>
-            <p className="text-[13px] font-semibold text-text-primary">{t('addCustomer.photoTitle')}</p>
-            <p className="text-[11px] text-text-muted mt-0.5 mb-3">{t('addCustomer.photoDesc')}</p>
-            <button onClick={handlePhotoSelect}
-              className="px-4 py-2 rounded-lg border border-border text-[12px] font-medium text-text-secondary hover:bg-card transition-colors">
-              {t('addCustomer.uploadImage')}
-            </button>
-          </section>
-          {}
-          <section className="card p-6">
-            <div className="flex items-center gap-2 mb-5">
-              <Settings size={16} className="text-text-muted" />
-              <h3 className="text-[15px] font-bold text-text-primary">{t('addCustomer.preferences')}</h3>
-            </div>
-            <div className="space-y-4">
-              <Field label={t('addCustomer.customerGroup')}>
-                <CustomSelect
-                  value={form.customer_group}
-                  onChange={(v) => setForm(f => ({ ...f, customer_group: v }))}
-                  options={groupOptions}
-                  placeholder={t('addCustomer.selectGroup')}
-                />
-              </Field>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[11px] font-semibold text-text-muted tracking-[0.06em] uppercase">{t('addCustomer.newsletters')}</p>
-                  <p className="text-[12px] text-text-secondary mt-0.5">{t('addCustomer.marketingOptIn')}</p>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2">
+                  <Field label={t('addCustomer.streetAddress')}>
+                    <input type="text" value={form.address}
+                      onChange={(e) => setForm(f => ({ ...f, address: e.target.value }))}
+                      className="form-input" placeholder={t('addCustomer.streetPh')} />
+                  </Field>
                 </div>
-                <button onClick={() => setForm(f => ({ ...f, marketing_opt_in: !form.marketing_opt_in }))}
-                  className={`relative w-10 h-[22px] rounded-full transition-colors ${form.marketing_opt_in ? 'bg-navy' : 'bg-border'}`}>
-                  <span className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-transform ${form.marketing_opt_in ? 'left-[21px]' : 'left-[3px]'}`} />
+                <Field label={t('addCustomer.city')}>
+                  <CustomSelect
+                    value={form.city}
+                    onChange={(v) => setForm(f => ({ ...f, city: v }))}
+                    options={[{ value: '', label: t('addCustomer.selectCity') }, ...algerianCities.map(c => ({ value: c, label: c }))]}
+                    placeholder={t('addCustomer.selectCity')}
+                  />
+                </Field>
+                <Field label={t('addCustomer.country')}>
+                  <CustomSelect
+                    value={form.country}
+                    onChange={(v) => setForm(f => ({ ...f, country: v }))}
+                    options={countryOptions}
+                    placeholder={t('addCustomer.selectCountry')}
+                  />
+                </Field>
+                <Field label={t('addCustomer.postalCode')}>
+                  <input type="text" value={form.postal_code}
+                    onChange={(e) => setForm(f => ({ ...f, postal_code: e.target.value }))}
+                    className="form-input" placeholder={t('addCustomer.postalPh')} />
+                </Field>
+              </div>
+            </section>
+          </div>
+
+          {/* Side column */}
+          <div className="space-y-6">
+            {/* Photo */}
+            <section className="card p-6 flex flex-col items-center text-center">
+              <div className="relative mb-4">
+                <div
+                  className="w-24 h-24 rounded-full bg-surface border border-border flex items-center justify-center overflow-hidden cursor-pointer hover:border-navy/40 transition-colors"
+                  onClick={handlePhotoSelect}
+                  onDragOver={handleDragOver}
+                  onDrop={handleDrop}
+                >
+                  {form.photo_path ? (
+                    <img src={convertFileSrc(form.photo_path)} alt={t('addCustomer.photoTitle')} className="w-full h-full object-cover" />
+                  ) : (
+                    <User size={36} className="text-text-muted" />
+                  )}
+                </div>
+                <button type="button" onClick={handlePhotoSelect} aria-label={t('addCustomer.uploadImage')}
+                  className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-navy text-white flex items-center justify-center ring-4 ring-card hover:bg-navy-light transition-colors">
+                  <Camera size={14} />
                 </button>
               </div>
-            </div>
-          </section>
-          {}
-          <section className="card p-6">
-            <Field label={t('addCustomer.internalNotes')}>
-              <textarea value={form.notes}
-                onChange={(e) => setForm(f => ({ ...f, notes: e.target.value }))}
-                className="form-input min-h-[80px] resize-y"
-                placeholder={t('addCustomer.notesPlaceholder')} />
-            </Field>
-          </section>
+              <p className="text-[14px] font-semibold text-text-primary">{t('addCustomer.photoTitle')}</p>
+              <p className="text-[13px] text-text-muted mt-1 mb-4">{t('addCustomer.photoDesc')}</p>
+              <button type="button" onClick={handlePhotoSelect} className="btn-secondary py-2 text-[13px]">
+                {t('addCustomer.uploadImage')}
+              </button>
+            </section>
+
+            {/* Preferences */}
+            <section className="card p-6">
+              <div className="flex items-center gap-2 mb-5">
+                <Settings size={16} className="text-text-muted" />
+                <h3 className="text-[15px] font-semibold text-text-primary">{t('addCustomer.preferences')}</h3>
+              </div>
+              <div className="space-y-5">
+                <Field label={t('addCustomer.customerGroup')}>
+                  <CustomSelect
+                    value={form.customer_group}
+                    onChange={(v) => setForm(f => ({ ...f, customer_group: v }))}
+                    options={groupOptions}
+                    placeholder={t('addCustomer.selectGroup')}
+                  />
+                </Field>
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-[13px] font-medium text-text-primary">{t('addCustomer.newsletters')}</p>
+                    <p className="text-[13px] text-text-secondary mt-0.5">{t('addCustomer.marketingOptIn')}</p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={form.marketing_opt_in}
+                    aria-label={t('addCustomer.marketingOptIn')}
+                    onClick={() => setForm(f => ({ ...f, marketing_opt_in: !form.marketing_opt_in }))}
+                    className={`relative w-10 h-6 rounded-full flex-shrink-0 transition-colors duration-150 ${form.marketing_opt_in ? 'bg-navy' : 'bg-border'}`}
+                  >
+                    <span className={`absolute top-1 left-0 w-4 h-4 rounded-full bg-card shadow-sm transition-transform duration-150 ${form.marketing_opt_in ? 'translate-x-5' : 'translate-x-1'}`} />
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            {/* Internal notes */}
+            <section className="card p-6">
+              <Field label={t('addCustomer.internalNotes')}>
+                <textarea value={form.notes}
+                  onChange={(e) => setForm(f => ({ ...f, notes: e.target.value }))}
+                  className="form-input min-h-[88px] resize-y"
+                  placeholder={t('addCustomer.notesPlaceholder')} />
+              </Field>
+            </section>
+          </div>
         </div>
       </div>
     </div>
   );
 }
+
 function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
   return (
     <div>
-      <label className="block text-[11px] font-semibold text-text-muted tracking-[0.06em] uppercase mb-1.5">
+      <label className="block text-[13px] font-medium text-text-secondary mb-1.5">
         {label}{required && <span className="text-accent-red ml-0.5">*</span>}
       </label>
       {children}

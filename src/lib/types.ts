@@ -349,3 +349,429 @@ export interface ReservationStats {
   pending_completion: number;
   cancelled_count: number;
 }
+
+// ============================================================================
+// HouSwitch Phone Data Transfer Types
+// ============================================================================
+
+export type DevicePlatform = 'android' | 'ios' | 'harmonyos';
+export type ConnectionType = 'usb' | 'wifi' | 'virtual';
+export type DeviceConnectionState = 'connected' | 'unauthorized' | 'offline' | 'locked' | 'need_trust';
+
+export type TransferCategory =
+  | 'contacts'
+  | 'messages'
+  | 'calls'
+  | 'calendars'
+  | 'photos'
+  | 'videos'
+  | 'audio'
+  | 'documents';
+
+export interface DeviceCapabilities {
+  can_read_contacts: boolean;
+  can_write_contacts: boolean;
+  can_read_messages: boolean;
+  can_write_messages: boolean;
+  can_read_calls: boolean;
+  can_write_calls: boolean;
+  can_read_calendars: boolean;
+  can_write_calendars: boolean;
+  can_read_media: boolean;
+  can_write_media: boolean;
+}
+
+export interface DeviceInfo {
+  id: string;
+  name: string;
+  brand: string;
+  model: string;
+  platform: DevicePlatform;
+  os_version: string;
+  connection_type: ConnectionType;
+  connection_state: DeviceConnectionState;
+  battery_level: number | null;
+  is_charging: boolean | null;
+  storage_total_bytes: number;
+  storage_free_bytes: number;
+  capabilities: DeviceCapabilities;
+  is_virtual: boolean;
+}
+
+export interface CategoryScanResult {
+  category: TransferCategory;
+  item_count: number;
+  total_bytes: number;
+  available: boolean;
+  note: string | null;
+}
+
+export interface DeviceDataSummary {
+  device_id: string;
+  categories: CategoryScanResult[];
+  total_items: number;
+  total_bytes: number;
+}
+
+export type TransferStatus = 'pending' | 'in_progress' | 'paused' | 'completed' | 'failed' | 'cancelled';
+
+export interface TransferSessionRecord {
+  id: number;
+  session_uuid: string;
+  source_device_id: string;
+  source_device_name: string;
+  source_platform: string;
+  target_device_id: string;
+  target_device_name: string;
+  target_platform: string;
+  status: TransferStatus;
+  total_items: number;
+  transferred_items: number;
+  total_bytes: number;
+  transferred_bytes: number;
+  selected_categories: string;
+  error_message: string | null;
+  started_at: string;
+  completed_at: string | null;
+}
+
+export interface TransferLogRecord {
+  id: number;
+  session_id: number;
+  category: string;
+  item_name: string;
+  item_size: number;
+  status: 'pending' | 'in_progress' | 'success' | 'skipped' | 'failed';
+  error_message: string | null;
+  checksum: string | null;
+  created_at: string;
+}
+
+export interface StartTransferRequest {
+  source_device_id: string;
+  target_device_id: string;
+  categories: string[];
+}
+
+export interface TransferProgressEvent {
+  session_uuid: string;
+  status: TransferStatus;
+  current_category: TransferCategory | null;
+  current_item_name: string | null;
+  current_item_index: number;
+  total_items: number;
+  transferred_bytes: number;
+  total_bytes: number;
+  progress_percentage: number;
+  speed_bytes_per_sec: number;
+  speed_mbps: number;
+  eta_seconds: number;
+  elapsed_seconds: number;
+  error_message: string | null;
+}
+
+export interface CategoryTransferSummary {
+  category: TransferCategory;
+  transferred_count: number;
+  failed_count: number;
+  total_bytes: number;
+}
+
+export interface TransferSummaryReport {
+  session_id: number;
+  session_uuid: string;
+  source_device_name: string;
+  source_platform: string;
+  target_device_name: string;
+  target_platform: string;
+  status: TransferStatus;
+  total_items: number;
+  transferred_items: number;
+  skipped_items: number;
+  failed_items: number;
+  total_bytes: number;
+  transferred_bytes: number;
+  duration_seconds: number;
+  average_speed_mbps: number;
+  categories_breakdown: CategoryTransferSummary[];
+}
+
+export interface WifiServerInfo {
+  ip_address: string;
+  port: number;
+  pin: string;
+  qr_code_svg: string;
+  qr_code_data_url: string;
+  connect_url: string;
+  active_connections: number;
+}
+
+
+// --- HouCheck Diagnostics System Types ---
+export type ComponentStatus =
+  | 'original'
+  | 'replaced_oem'
+  | 'replaced_third_party'
+  | 'defective'
+  | 'unknown';
+
+export interface PartAuditItem {
+  name: string;
+  status: ComponentStatus;
+  read_serial?: string | null;
+  factory_serial?: string | null;
+  is_original: boolean;
+  note?: string | null;
+}
+
+export interface PartsAuditReport {
+  screen: PartAuditItem;
+  battery: PartAuditItem;
+  rear_camera: PartAuditItem;
+  front_camera: PartAuditItem;
+  biometrics: PartAuditItem;
+  logic_board: PartAuditItem;
+}
+
+export interface BatteryGasGauge {
+  health_percentage: number;
+  cycle_count: number;
+  design_capacity_mah: number;
+  actual_capacity_mah: number;
+  temperature_celsius: number;
+  serial_number?: string | null;
+  manufacturer?: string | null;
+  status: ComponentStatus;
+  current_charge_percentage?: number | null;
+  is_charging?: boolean | null;
+}
+
+export interface SecurityLockStatus {
+  icloud_fmi_locked: boolean;
+  fmi_account_masked?: string | null;
+  fmi_on?: boolean;
+  mdm_enrolled: boolean;
+  carrier_locked: boolean;
+  carrier_name?: string | null;
+  knox_tripped: boolean;
+  frp_locked: boolean;
+  bootloader_unlocked: boolean;
+  is_rooted_or_jailbroken: boolean;
+}
+
+export interface HardwareTestResult {
+  key: string;
+  name: string;
+  category: string;
+  passed: boolean;
+  tested: boolean;
+  details?: string | null;
+}
+
+export type DeviceGrade = 'A+' | 'A' | 'B' | 'C' | 'Defective';
+
+export interface GradingResult {
+  score: number;
+  grade: DeviceGrade;
+  passed_count: number;
+  total_count: number;
+  valuation_multiplier: number;
+  summary: string;
+  defects: string[];
+}
+
+export interface FullDeviceDiagnosticReport {
+  device_id: string;
+  device_name: string;
+  brand: string;
+  model: string;
+  platform: string;
+  os_version: string;
+  imei1?: string | null;
+  imei2?: string | null;
+  serial_number?: string | null;
+  baseband_version?: string | null;
+  cpu_architecture: string;
+  ram_gb: number;
+  storage_total_bytes: number;
+  storage_free_bytes: number;
+  battery: BatteryGasGauge;
+  parts_audit: PartsAuditReport;
+  security_locks: SecurityLockStatus;
+  hardware_tests: Record<string, HardwareTestResult>;
+  grading: GradingResult;
+}
+
+export interface DeviceInspectionRecord {
+  id: number;
+  inspection_uuid: string;
+  device_id: string;
+  device_name: string;
+  brand: string;
+  model: string;
+  platform: string;
+  os_version: string;
+  imei1?: string | null;
+  imei2?: string | null;
+  serial_number?: string | null;
+  battery_health: number;
+  battery_cycles: number;
+  battery_design_mah: number;
+  battery_actual_mah: number;
+  parts_audit: string;
+  hardware_tests: string;
+  score: number;
+  calculated_grade: string;
+  passed_tests_count: number;
+  total_tests_count: number;
+  lock_status: string;
+  technician_notes?: string | null;
+  created_at: string;
+}
+
+export interface DiagnosticServerInfo {
+  ip_address: string;
+  port: number;
+  pin: string;
+  connect_url: string;
+  qr_code_svg: string;
+  qr_code_data_url: string;
+}
+
+export interface MobileDiagnosticSyncEvent {
+  test_key: string;
+  passed: boolean;
+  details?: string | null;
+}
+
+export interface VirtualDeviceOption {
+  id: string;
+  name: string;
+  brand: string;
+  os: string;
+}
+
+export interface ConvertToVariantRequest {
+  inspection_id: number;
+  product_id: number;
+  variant_name?: string;
+  cost_price: number;
+  selling_price: number;
+  quantity: number;
+}
+
+export interface ConvertToVariantResponse {
+  variant_id: number;
+  inspection_uuid: string;
+  message: string;
+}
+
+// ==========================================
+// HouWipe: Phone Sanitization & Secure Wipe Types
+// ==========================================
+
+export type WipeRiskLevel = 'safe' | 'warning' | 'critical_blocked';
+
+export interface ActiveAccountInfo {
+  account_type: 'icloud' | 'google' | 'samsung' | 'xiaomi' | 'huawei' | 'other' | string;
+  account_name: string;
+  identifier: string;
+  action_required: string;
+}
+
+export interface WipeMethodInfo {
+  id: string;
+  name: string;
+  description: string;
+  nist_compliant: boolean;
+  estimated_seconds: number;
+  requires_reboot: boolean;
+}
+
+export interface PreWipeAuditResult {
+  device_id: string;
+  device_name: string;
+  brand: string;
+  model: string;
+  platform: string;
+  os_version: string;
+  imei?: string | null;
+  imei2?: string | null;
+  serial_number?: string | null;
+  storage_capacity?: string | null;
+  battery_level?: number | null;
+  is_safe_to_wipe: boolean;
+  risk_level: WipeRiskLevel;
+  blocking_reasons: string[];
+  warning_reasons: string[];
+  active_accounts: ActiveAccountInfo[];
+  fmi_status: boolean;
+  fmi_account_masked?: string | null;
+  frp_status: boolean;
+  mdm_enrolled: boolean;
+  supported_wipe_methods: WipeMethodInfo[];
+}
+
+export interface WipeProgressEvent {
+  step: number;
+  total_steps: number;
+  stage_name: string;
+  progress_percent: number;
+  log_line: string;
+  is_complete: boolean;
+  is_error: boolean;
+  error_message?: string | null;
+}
+
+export interface ExecuteWipeRequest {
+  device_id: string;
+  platform: string;
+  wipe_method: string;
+  technician_name: string;
+  technician_override: boolean;
+  imei_confirmation_digits: string;
+  customer_backup_confirmed: boolean;
+  notes?: string | null;
+}
+
+export interface SanitizationRecord {
+  id: number;
+  wipe_uuid: string;
+  device_id: string;
+  device_name: string;
+  brand: string;
+  model: string;
+  platform: string;
+  os_version: string;
+  imei?: string | null;
+  imei2?: string | null;
+  serial_number?: string | null;
+  storage_capacity?: string | null;
+  wipe_method: string;
+  nist_standard: string;
+  pre_wipe_accounts_removed: boolean;
+  pre_wipe_lock_audit: unknown;
+  post_wipe_oobe_verified: boolean;
+  status: string;
+  technician_name: string;
+  notes?: string | null;
+  duration_seconds: number;
+  certificate_number: string;
+  created_at: string;
+}
+
+export interface ConvertSanitizationToVariantRequest {
+  sanitization_id: number;
+  product_id: number;
+  variant_name?: string;
+  cost_price: number;
+  selling_price: number;
+  quantity: number;
+}
+
+export interface ConvertSanitizationToVariantResponse {
+  variant_id: number;
+  certificate_number: string;
+  message: string;
+}
+

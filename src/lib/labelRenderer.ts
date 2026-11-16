@@ -478,7 +478,7 @@ function layoutFallbackCode128(
 
   const barH = Math.max(22, Math.round(targetBarHeight));
   // Start wide and step down until the symbol fits the available width.
-  let startMw = Math.min(4, Math.max(1, Math.floor(availWidth / Math.max(48, value.length * 11 + 24))));
+  const startMw = Math.min(4, Math.max(1, Math.floor(availWidth / Math.max(48, value.length * 11 + 24))));
   let fitCanvas: HTMLCanvasElement | null = null;
   let usedMw = 1;
 

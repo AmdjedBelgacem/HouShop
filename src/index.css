@@ -1,74 +1,307 @@
 @import "tailwindcss";
 
+/*
+ * Bundled fonts (variable, woff2), so the console looks the same offline and on every machine.
+ * Geist and JetBrains Mono are under the SIL Open Font License; see src/assets/fonts/*-OFL.txt.
+ * Latin and Latin Extended cover English and French; Arabic uses the system's Arabic font.
+ */
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("./assets/fonts/geist-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Geist";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("./assets/fonts/geist-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("./assets/fonts/jetbrains-mono-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("./assets/fonts/jetbrains-mono-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/*
+ * HouShop design system, built on the QR-Sense Console language (Claude Design canvas
+ * "HouShop Redesign"). A dark, quiet console: blue-glow ground, opaque raised cards with a
+ * hairline edge, one blue accent used only for state, Geist text with JetBrains Mono labels.
+ *
+ * Token names are stable: every page references them, so the values below restyle the app.
+ * The product has one theme; `.dark` keeps the same values so the old toggle cannot split it.
+ */
+
 @theme {
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --color-navy: #1E293B;
-  --color-navy-light: #334155;
-  --color-sidebar: #F8F9FA;
-  --color-surface: #F8F9FA;
-  --color-card: #FFFFFF;
-  --color-border: #E5E7EB;
-  --color-border-light: #F1F5F9;
-  --color-text-primary: #1F2937;
-  --color-text-secondary: #6B7280;
-  --color-text-muted: #9CA3AF;
-  --color-accent-blue: #3B82F6;
-  --color-accent-red: #EF4444;
-  --color-accent-green: #22C55E;
-  --color-chart-navy: #1E293B;
-  --color-chart-gray: #6B7280;
-  --color-chart-light: #D1D5DB;
-  --color-donut-bg: #F1F5F9;
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Ground and surfaces (surface-0, surface-1, raised-1) */
+  --color-surface: #060a14;
+  --color-sidebar: #0d1322;
+  --color-card: #141b2d;
+  --color-raised: #1c2437;
+
+  /* Hairlines: line-strong around surfaces, line between rows */
+  --color-border: rgba(110, 145, 215, 0.36);
+  --color-border-light: rgba(96, 130, 200, 0.24);
+
+  /* Ink */
+  --color-text-primary: #faf8fd;
+  --color-text-secondary: #c5c3c9;
+  --color-text-muted: #a4a1a8;
+
+  /* One accent, for state: primary-fill as a ground, light-blue ink as text (see overrides below).
+     Token names (navy, pink, accent-purple) are historical; the values are blue. */
+  --color-navy: #2563eb;
+  --color-navy-light: #1d4ed8;
+  --color-pink: #3b82f6;
+  --color-pink-ink: #93c5fd;
+
+  /* Data and status colours (blue, teal, warn-ink, danger-ink) */
+  --color-accent-blue: #60a5fa;
+  --color-accent-purple: #60a5fa;
+  --color-accent-green: #2dd4bf;
+  --color-accent-teal: #2dd4bf;
+  --color-accent-orange: #fcd772;
+  --color-accent-red: #fe738a;
+
+  /* Charts */
+  --color-chart-navy: #60a5fa;
+  --color-chart-gray: #a4a1a8;
+  --color-chart-light: rgba(250, 248, 253, 0.08);
+  --color-donut-bg: rgba(250, 248, 253, 0.07);
+
+  --radius-card: 14px;
+  --shadow-card: inset 0 1px 0 rgba(250, 248, 253, 0.06), 0 1px 2px rgba(0, 0, 0, 0.38), 0 10px 30px -14px rgba(0, 0, 0, 0.5);
+  --shadow-raised: 0 2px 6px rgba(0, 0, 0, 0.42), 0 28px 70px -24px rgba(0, 0, 0, 0.55);
+}
+
+:root,
+.dark {
+  color-scheme: dark;
 }
 
 * {
   box-sizing: border-box;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
-  @apply bg-surface text-text-primary antialiased;
+  @apply text-text-primary antialiased;
   font-family: var(--font-sans);
+  background-color: #060a14;
+  /* The page glow: one static blue radial at the top centre and a faint blue bloom top right. */
+  background-image:
+    radial-gradient(1100px 520px at 55% -160px, rgba(37, 99, 235, 0.34), transparent 70%),
+    radial-gradient(560px 340px at 100% -40px, rgba(59, 130, 246, 0.12), transparent 70%);
+  background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-::-webkit-scrollbar { width: 5px; height: 5px; }
+/* A solid blue focus ring on every focusable element, never removed. */
+:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+::selection { background: rgba(59, 130, 246, 0.35); color: #faf8fd; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 10px; }
-::-webkit-scrollbar-thumb:hover { background: #9CA3AF; }
+::-webkit-scrollbar-thumb { background: rgba(250, 248, 253, 0.14); border-radius: 999px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: rgba(250, 248, 253, 0.26); background-clip: padding-box; }
 
-.dark {
-  --color-navy: #3B82F6;
-  --color-navy-light: #60A5FA;
-  --color-sidebar: #141B2D;
-  --color-surface: #0B1120;
-  --color-card: #141B2D;
-  --color-border: #1F2937;
-  --color-border-light: #151D2E;
-  --color-text-primary: #E8ECF2;
-  --color-text-secondary: #7B8794;
-  --color-text-muted: #4B5C6E;
-  --color-accent-blue: #60A5FA;
-  --color-accent-green: #4ADE80;
-  --color-chart-navy: #60A5FA;
-  --color-chart-gray: #6B7A8C;
-  --color-chart-light: #2A3548;
-  --color-donut-bg: #1F2937;
-}
+select, input, textarea { color-scheme: dark; }
+option { background: #1c2437; color: #faf8fd; }
 
-.dark ::-webkit-scrollbar-thumb { background: #2A3548; }
-.dark ::-webkit-scrollbar-thumb:hover { background: #3B4A5E; }
+/* ---------- Overrides one token cannot express ---------- */
 
+/* Arabic script is joined: any letter-spacing (positive or the tight display
+   tracking) breaks the joins, and the mono face has no Arabic glyphs. */
+html[lang="ar"] [class*="tracking-"],
+html[lang="ar"] .page-title,
+html[lang="ar"] .eyebrow,
+html[lang="ar"] .eyebrow-accent,
+html[lang="ar"] .font-mono { letter-spacing: 0; }
+html[lang="ar"] .eyebrow,
+html[lang="ar"] .eyebrow-accent { font-family: var(--font-sans); text-transform: none; }
+
+/* The accent as text reads as light blue on the dark ground (primary-fill is too dark for text). */
+.text-navy { color: #93c5fd; }
+.hover\:text-navy:hover { color: #93c5fd; }
+
+/* Bright fills carry dark labels: white on teal, gold or coral fails contrast. */
+.bg-accent-green.text-white,
+.bg-accent-teal.text-white,
+.bg-accent-orange.text-white,
+.bg-accent-red.text-white,
+.bg-accent-blue.text-white,
+.bg-accent-purple.text-white { color: #060a14; }
+
+/* Inside a raised surface, "surface" fills and hovers lift (fill-1) instead of sinking to the ground. */
+.card .bg-surface,
+.bg-card .bg-surface { background-color: rgba(250, 248, 253, 0.04); }
+.hover\:bg-surface:hover { background-color: rgba(250, 248, 253, 0.06); }
+
+/* Component classes live in a layer so utility classes (pl-10, py-3, ...) can still override them. */
+@layer components {
+
+/* ---------- Surfaces ---------- */
 .card {
-  @apply bg-card rounded-xl border border-border;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02);
-}
-.dark .card {
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2), 0 1px 2px rgba(0,0,0,0.15);
+  @apply bg-card border border-border;
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
 }
 
+.glass {
+  background: rgba(7, 11, 22, 0.88);
+  -webkit-backdrop-filter: saturate(160%) blur(18px);
+  backdrop-filter: saturate(160%) blur(18px);
+}
+
+/* ---------- Inputs ---------- */
 .form-input {
-  @apply w-full px-3 py-2 rounded-lg border border-border text-[13px] text-text-primary
-         focus:outline-none focus:ring-2 focus:ring-navy/15 focus:border-navy/30
-         placeholder:text-text-muted bg-card transition-colors;
+  @apply w-full h-10 px-3 rounded-[10px] border text-[14px] text-text-primary
+         placeholder:text-text-muted transition-[border-color,background-color] duration-150
+         focus:outline-none;
+  border-color: rgba(250, 248, 253, 0.42);
+  background-color: rgba(250, 248, 253, 0.04);
+}
+.form-input:focus { border-color: #60a5fa; background-color: rgba(250, 248, 253, 0.06); }
+textarea.form-input { height: auto; padding-top: 10px; padding-bottom: 10px; }
+
+/* ---------- Buttons ---------- */
+.btn-primary,
+.btn-secondary,
+.btn-ghost,
+.btn-danger {
+  @apply inline-flex items-center justify-center gap-2 h-10 rounded-[10px] px-4 text-[14px] font-semibold
+         whitespace-nowrap transition-[background-color,color,transform] duration-150 select-none
+         active:scale-[0.98] disabled:opacity-45 disabled:pointer-events-none;
+}
+.btn-primary { background-color: #2563eb; color: #faf8fd; }
+.btn-primary:hover { background-color: #1d4ed8; }
+.btn-primary:active { background-color: #1e40af; }
+.btn-secondary { background-color: rgba(250, 248, 253, 0.07); color: #faf8fd; border: 1px solid rgba(250, 248, 253, 0.42); }
+.btn-secondary:hover { background-color: rgba(250, 248, 253, 0.11); }
+.btn-ghost { color: #c5c3c9; }
+.btn-ghost:hover { background-color: rgba(250, 248, 253, 0.06); color: #faf8fd; }
+.btn-danger { background-color: #ff4d6a; color: #060a14; }
+.btn-danger:hover { background-color: #fe738a; }
+
+/* ---------- Badges ---------- */
+.badge {
+  @apply inline-flex items-center gap-1.5 h-6 rounded-full px-2.5 text-[12px] font-medium whitespace-nowrap;
+}
+
+/* ---------- Typography ---------- */
+/* Page title: a noun with a full stop set in the accent (only when the title is plain text). */
+.page-title {
+  @apply text-[52px] leading-[56px] font-semibold tracking-[-0.05em] text-text-primary;
+  text-wrap: balance;
+}
+.page-title:not(:has(*))::after {
+  content: ".";
+  color: #3b82f6;
+}
+/* A badge or chip set inside a title keeps its own size and tracking. */
+.page-title .badge {
+  font-size: 12px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+.page-subtitle {
+  @apply mt-2 text-[16px] leading-[26px] text-text-secondary;
+  max-width: 60ch;
+  text-wrap: pretty;
+}
+/* Card eyebrow: small mono label in ink-3. */
+.eyebrow {
+  font-family: var(--font-mono);
+  @apply text-[11px] leading-[15px] font-semibold uppercase tracking-[0.06em] text-text-muted;
+}
+/* Section eyebrow above a page title, with the glowing dot. */
+.eyebrow-accent {
+  font-family: var(--font-mono);
+  @apply inline-flex items-center gap-2.5 text-[12px] leading-4 font-medium uppercase tracking-[0.14em];
+  color: #93c5fd;
+}
+.eyebrow-accent::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3b82f6;
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.9);
+}
+
+}
+
+/* ---------- Motion ---------- */
+@keyframes beamFlow {
+  0% { stroke-dashoffset: 48; }
+  100% { stroke-dashoffset: 0; }
+}
+
+@keyframes pulseGlowCyan {
+  0%, 100% { box-shadow: 0 0 15px rgba(96, 165, 250, 0.25), 0 0 30px rgba(96, 165, 250, 0.1); }
+  50% { box-shadow: 0 0 25px rgba(96, 165, 250, 0.5), 0 0 50px rgba(96, 165, 250, 0.25); }
+}
+
+@keyframes pulseGlowEmerald {
+  0%, 100% { box-shadow: 0 0 15px rgba(45, 212, 191, 0.25), 0 0 30px rgba(45, 212, 191, 0.1); }
+  50% { box-shadow: 0 0 25px rgba(45, 212, 191, 0.5), 0 0 50px rgba(45, 212, 191, 0.25); }
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* `backwards` (not `both`): a finished animation must not leave a transform behind,
+   because a transform makes its element the containing block for position:fixed modals. */
+.animate-fade-up {
+  animation: fadeUp 240ms cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+}
+
+.animate-beam-flow {
+  stroke-dasharray: 8 8;
+  animation: beamFlow 1.2s linear infinite;
+}
+
+.animate-glow-source {
+  animation: pulseGlowCyan 2.5s ease-in-out infinite;
+}
+
+.animate-glow-target {
+  animation: pulseGlowEmerald 2.5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
 }
