@@ -232,4 +232,5 @@ pub struct DiagnosticServerInfo {
     pub connect_url: String,
     pub qr_code_svg: String,
     pub qr_code_data_url: String,
+    pub connected: bool,
 }

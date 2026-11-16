@@ -13,6 +13,7 @@ use qrcode::render::svg;
 use qrcode::QrCode;
 use serde::{Deserialize, Serialize};
 use std::net::UdpSocket;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{broadcast, oneshot};
@@ -30,6 +31,7 @@ pub struct ServerSharedState {
     pub sync_tx: broadcast::Sender<MobileDiagnosticSyncEvent>,
     pub command_tx: broadcast::Sender<DeviceCommandEvent>,
     pub app_handle: Option<AppHandle>,
+    pub connected_clients: Arc<AtomicUsize>,
 }
 
 #[derive(Deserialize)]
@@ -55,6 +57,7 @@ pub struct DiagnosticServerManager {
     sync_tx: broadcast::Sender<MobileDiagnosticSyncEvent>,
     command_tx: broadcast::Sender<DeviceCommandEvent>,
     forwarder_spawned: bool,
+    connected_clients: Arc<AtomicUsize>,
 }
 
 impl DiagnosticServerManager {
@@ -66,7 +69,12 @@ impl DiagnosticServerManager {
             sync_tx,
             command_tx,
             forwarder_spawned: false,
+            connected_clients: Arc::new(AtomicUsize::new(0)),
         }
+    }
+
+    pub fn is_connected(&self) -> bool {
+        self.connected_clients.load(Ordering::SeqCst) > 0
     }
 
     #[allow(dead_code)]
@@ -75,7 +83,11 @@ impl DiagnosticServerManager {
     }
 
     pub fn get_info(&self) -> Option<DiagnosticServerInfo> {
-        self.handle.as_ref().map(|h| h.info.clone())
+        self.handle.as_ref().map(|h| {
+            let mut info = h.info.clone();
+            info.connected = self.is_connected();
+            info
+        })
     }
 
     pub fn send_command(
@@ -135,6 +147,7 @@ impl DiagnosticServerManager {
             connect_url,
             qr_code_svg,
             qr_code_data_url,
+            connected: self.is_connected(),
         };
 
         let shared_state = Arc::new(ServerSharedState {
@@ -142,6 +155,7 @@ impl DiagnosticServerManager {
             sync_tx: self.sync_tx.clone(),
             command_tx: self.command_tx.clone(),
             app_handle,
+            connected_clients: self.connected_clients.clone(),
         });
 
         let app = Router::new()
@@ -228,7 +242,29 @@ async fn handle_ws_upgrade(
     let sync_tx = state.sync_tx.clone();
     let command_rx = state.command_tx.subscribe();
     let app_handle = state.app_handle.clone();
-    ws.on_upgrade(move |socket| handle_ws_connection(socket, sync_tx, command_rx, app_handle))
+    let connected_clients = state.connected_clients.clone();
+    ws.on_upgrade(move |socket| {
+        handle_ws_connection(socket, sync_tx, command_rx, app_handle, connected_clients)
+    })
+}
+
+struct ClientGuard {
+    clients: Arc<AtomicUsize>,
+    app_handle: Option<AppHandle>,
+}
+
+impl Drop for ClientGuard {
+    fn drop(&mut self) {
+        let prev = self.clients.fetch_sub(1, Ordering::SeqCst);
+        if prev <= 1 {
+            if let Some(app) = &self.app_handle {
+                let _ = app.emit(
+                    "mobile-companion-disconnected",
+                    serde_json::json!({ "connected": false }),
+                );
+            }
+        }
+    }
 }
 
 async fn handle_ws_connection(
@@ -236,13 +272,19 @@ async fn handle_ws_connection(
     sync_tx: broadcast::Sender<MobileDiagnosticSyncEvent>,
     mut command_rx: broadcast::Receiver<DeviceCommandEvent>,
     app_handle: Option<AppHandle>,
+    connected_clients: Arc<AtomicUsize>,
 ) {
+    connected_clients.fetch_add(1, Ordering::SeqCst);
     if let Some(app) = &app_handle {
         let _ = app.emit(
             "mobile-companion-connected",
             serde_json::json!({ "connected": true }),
         );
     }
+    let _guard = ClientGuard {
+        clients: connected_clients,
+        app_handle: app_handle.clone(),
+    };
 
     loop {
         tokio::select! {
@@ -274,13 +316,6 @@ async fn handle_ws_connection(
                 }
             }
         }
-    }
-
-    if let Some(app) = &app_handle {
-        let _ = app.emit(
-            "mobile-companion-disconnected",
-            serde_json::json!({ "connected": false }),
-        );
     }
 }
 
@@ -538,6 +573,11 @@ fn render_mobile_diagnostic_html(pin: &str) -> String {
       const sheet = document.getElementById('askSheet');
       document.getElementById('askText').innerText = question;
       sheet.style.display = 'flex';
+      sheet.onclick = (e) => {{
+        if (e.target === sheet) {{
+          sheet.style.display = 'none';
+        }}
+      }};
       const done = (passed) => {{
         sheet.style.display = 'none';
         syncResult(testKey, passed, passed ? passDetails : failDetails);
@@ -637,6 +677,9 @@ fn render_mobile_diagnostic_html(pin: &str) -> String {
     // Handle commands received from Desktop Mission Control
     function handleRemoteCommand(action, params) {{
       unlockMobileAudio();
+      const sheet = document.getElementById('askSheet');
+      if (sheet) sheet.style.display = 'none';
+      if (action === 'dismiss_sheet') return;
       if (action === 'play_tone') {{
         const freq = (params && params.freq) ? params.freq : 440;
         const key = (params && params.key) ? params.key : (freq === 440 ? 'earpiece_speaker' : 'bottom_loudspeaker');
@@ -745,15 +788,32 @@ fn render_mobile_diagnostic_html(pin: &str) -> String {
     // --- Haptics & Vibration ---
     function testHaptics(btn) {{
       unlockMobileAudio();
-      // iPhone browsers have no vibration API, so this can't be tested here.
-      if (!navigator.vibrate) {{
-        note("This phone's browser can't make the phone vibrate (iPhone Safari never can). Test the vibration motor by hand on the desktop.");
-        return;
+      // Physical vibration if supported natively (Android / standard browsers)
+      if (navigator.vibrate) {{
+        try {{
+          navigator.vibrate([100, 60, 100, 60, 250]);
+        }} catch(e) {{}}
       }}
-      navigator.vibrate([100, 60, 100, 60, 250]);
-      ask('Did the phone vibrate?', 'vibration_motor',
+      // On iOS Safari (which restricts navigator.vibrate), synthesize an 85Hz resonant acoustic thud pulse
+      // through the loudspeaker coil so the physical vibration kick is felt directly in the palm
+      try {{
+        if (audioCtx) {{
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(85, audioCtx.currentTime);
+          gain.gain.setValueAtTime(0.85, audioCtx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start();
+          osc.stop(audioCtx.currentTime + 0.4);
+        }}
+      }} catch(e) {{}}
+
+      ask('Did you feel or hear the phone vibration / haptic pulse?', 'vibration_motor',
         'Technician felt the vibration pulse',
-        'No vibration felt',
+        'No vibration or pulse felt',
         (ok) => {{ if (btn) {{ btn.innerText = ok ? 'Passed' : 'Failed'; btn.classList.add(ok ? 'btn-success' : 'btn-danger'); }} }});
     }}
 

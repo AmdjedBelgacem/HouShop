@@ -1,18 +1,19 @@
 use crate::diagnostics::types::{ComponentStatus, PartAuditItem, PartsAuditReport};
 
-/// Note used for every component. This build has no reliable way to confirm that a part is
-/// genuine, so none of them is reported as original. Serials that were actually read are kept
-/// for the record, but there is no factory reference to compare them against.
-const NOT_VERIFIED: &str = "Originality not verified: this build cannot confirm genuine parts";
-
 fn unverified(name: &str, read_serial: Option<String>) -> PartAuditItem {
+    let note = match &read_serial {
+        Some(s) if !s.trim().is_empty() => {
+            format!("Serial read ({s}); factory registration not verified")
+        }
+        _ => "Serial not reported by system bus".to_string(),
+    };
     PartAuditItem {
         name: name.into(),
         status: ComponentStatus::Unknown,
         read_serial,
         factory_serial: None,
         is_original: false,
-        note: Some(NOT_VERIFIED.into()),
+        note: Some(note),
     }
 }
 

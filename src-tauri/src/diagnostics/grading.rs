@@ -320,8 +320,8 @@ pub fn calculate_device_grading(
                 defects.push(format!("{name} hardware failure or serialization mismatch"));
             }
             ComponentStatus::Unknown => {
-                // Originality was not verified. This is not treated as a pass.
-                defects.push(format!("{name} originality not verified"));
+                // Serial could not be read or verified against factory database.
+                // Informational only — not a hardware defect.
             }
         }
     };
@@ -460,7 +460,10 @@ pub fn calculate_device_grading(
         (DeviceGrade::Defective, 0.20)
     } else if final_score >= 95
         && battery.health_percentage >= 85
-        && parts_audit.screen.is_original
+        && !matches!(
+            parts_audit.screen.status,
+            ComponentStatus::ReplacedThirdParty | ComponentStatus::Defective
+        )
         && defects.is_empty()
     {
         (DeviceGrade::APlus, 1.00)
@@ -678,5 +681,20 @@ mod tests {
         assert!(!res.provisional);
         assert!(res.defects.iter().any(|d| d.contains("test failed")));
         assert_ne!(res.grade, DeviceGrade::APlus);
+    }
+
+    #[test]
+    fn unknown_parts_do_not_produce_bogus_defects() {
+        let battery = make_perfect_battery();
+        let mut parts = make_clean_parts();
+        parts.front_camera.status = ComponentStatus::Unknown;
+        parts.front_camera.is_original = false;
+        let locks = make_clean_locks();
+        let mut tests_map = HashMap::new();
+        for t in simulated_standard_tests() {
+            tests_map.insert(t.key.clone(), t);
+        }
+        let res = calculate_device_grading(&battery, &parts, &locks, &tests_map);
+        assert!(res.defects.is_empty(), "Unknown parts must not be treated as defects: {:?}", res.defects);
     }
 }

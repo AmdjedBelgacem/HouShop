@@ -108,6 +108,13 @@ pub async fn get_diagnostic_server_info(
     Ok(server.get_info())
 }
 
+#[derive(serde::Deserialize)]
+pub struct TestUpdateItem {
+    pub key: String,
+    pub passed: bool,
+    pub details: Option<String>,
+}
+
 #[tauri::command]
 pub async fn update_report_test(
     state: State<'_, DiagnosticState>,
@@ -119,6 +126,20 @@ pub async fn update_report_test(
     state
         .engine
         .update_hardware_test(&mut report, &test_key, passed, details);
+    Ok(report)
+}
+
+#[tauri::command]
+pub async fn batch_update_report_tests(
+    state: State<'_, DiagnosticState>,
+    mut report: FullDeviceDiagnosticReport,
+    updates: Vec<TestUpdateItem>,
+) -> Result<FullDeviceDiagnosticReport, String> {
+    let list: Vec<(String, bool, Option<String>)> = updates
+        .into_iter()
+        .map(|u| (u.key, u.passed, u.details))
+        .collect();
+    state.engine.batch_update_hardware_tests(&mut report, list);
     Ok(report)
 }
 

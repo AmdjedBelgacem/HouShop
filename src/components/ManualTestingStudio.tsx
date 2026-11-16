@@ -35,6 +35,7 @@ interface ManualTestingStudioProps {
   platform: string;
   hardwareTests: Record<string, HardwareTestResult>;
   onUpdateTest: (key: string, passed: boolean, details?: string) => void;
+  companionConnected?: boolean;
 }
 
 type TabType = 'sound' | 'mic' | 'vibrate' | 'camera' | 'screen';
@@ -47,10 +48,11 @@ export const ManualTestingStudio: React.FC<ManualTestingStudioProps> = ({
   platform,
   hardwareTests,
   onUpdateTest,
+  companionConnected,
 }) => {
   const [activeTab, setActiveTab] = useState<TabType>('sound');
   const [serverInfo, setServerInfo] = useState<DiagnosticServerInfo | null>(null);
-  const [phoneConnected, setPhoneConnected] = useState<boolean>(false);
+  const [phoneConnected, setPhoneConnected] = useState<boolean>(companionConnected || false);
   const [activeActionLabel, setActiveActionLabel] = useState<string | null>(null);
   const [showQrDetails, setShowQrDetails] = useState<boolean>(false);
   const { t } = useI18n();
@@ -59,6 +61,12 @@ export const ManualTestingStudio: React.FC<ManualTestingStudioProps> = ({
   useEffect(() => {
     tRef.current = t;
   }, [t]);
+
+  useEffect(() => {
+    if (companionConnected !== undefined) {
+      setPhoneConnected(companionConnected);
+    }
+  }, [companionConnected]);
 
   // Initialize companion server and listeners
   useEffect(() => {
@@ -72,6 +80,9 @@ export const ManualTestingStudio: React.FC<ManualTestingStudioProps> = ({
     invoke<DiagnosticServerInfo>('start_diagnostic_server')
       .then((info) => {
         setServerInfo(info);
+        if (info.connected) {
+          setPhoneConnected(true);
+        }
       })
       .catch((err) => {
         console.error('Failed to start diagnostic server:', err);
@@ -590,11 +601,12 @@ export const ManualTestingStudio: React.FC<ManualTestingStudioProps> = ({
                   <span className="text-[13px] text-text-muted">{t('manual.vibrate.result')}</span>
                   <div className="flex gap-2">
                     <button
-                      onClick={() =>
-                        onUpdateTest('force_touch', true, t('manual.detail.hapticPass'))
-                      }
+                      onClick={() => {
+                        onUpdateTest('vibration_motor', true, t('manual.detail.hapticPass'));
+                        sendPhoneCommand('dismiss_sheet');
+                      }}
                       className={`px-3 py-1.5 rounded-lg text-[13px] font-bold flex items-center gap-1.5 transition-colors ${
-                        hardwareTests['force_touch']?.passed
+                        hardwareTests['vibration_motor']?.passed
                           ? 'bg-accent-green text-white font-bold'
                           : 'bg-accent-green/20 text-accent-green hover:bg-accent-green/30'
                       }`}
@@ -602,11 +614,12 @@ export const ManualTestingStudio: React.FC<ManualTestingStudioProps> = ({
                       <CheckCircle2 size={13} /> {t('manual.passed')}
                     </button>
                     <button
-                      onClick={() =>
-                        onUpdateTest('force_touch', false, t('manual.detail.hapticFail'))
-                      }
+                      onClick={() => {
+                        onUpdateTest('vibration_motor', false, t('manual.detail.hapticFail'));
+                        sendPhoneCommand('dismiss_sheet');
+                      }}
                       className={`px-3 py-1.5 rounded-lg text-[13px] font-bold flex items-center gap-1.5 transition-colors ${
-                        hardwareTests['force_touch']?.tested && !hardwareTests['force_touch'].passed
+                        hardwareTests['vibration_motor']?.tested && !hardwareTests['vibration_motor'].passed
                           ? 'bg-accent-red text-white font-bold'
                           : 'bg-accent-red/20 text-accent-red hover:bg-accent-red/30'
                       }`}

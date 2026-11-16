@@ -643,6 +643,7 @@ export interface DiagnosticServerInfo {
   connect_url: string;
   qr_code_svg: string;
   qr_code_data_url: string;
+  connected?: boolean;
 }
 
 export interface MobileDiagnosticSyncEvent {

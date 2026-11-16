@@ -131,6 +131,7 @@ pub fn run() {
             commands::diagnostics::stop_diagnostic_server,
             commands::diagnostics::get_diagnostic_server_info,
             commands::diagnostics::update_report_test,
+            commands::diagnostics::batch_update_report_tests,
             commands::diagnostics::save_device_inspection,
             commands::diagnostics::list_device_inspections,
             commands::diagnostics::get_device_inspection,

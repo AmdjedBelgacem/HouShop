@@ -83,6 +83,31 @@ impl DiagnosticEngine {
         );
     }
 
+    /// Batch updates multiple hardware tests in a single pass and re-evaluates grading once.
+    pub fn batch_update_hardware_tests(
+        &self,
+        report: &mut FullDeviceDiagnosticReport,
+        updates: Vec<(String, bool, Option<String>)>,
+    ) {
+        for (test_key, passed, details) in updates {
+            if let Some(test) = report.hardware_tests.get_mut(&test_key) {
+                test.passed = passed;
+                test.tested = true;
+                if let Some(d) = details {
+                    test.details = Some(d);
+                }
+            }
+        }
+
+        // Recalculate grading once after all updates
+        report.grading = calculate_device_grading(
+            &report.battery,
+            &report.parts_audit,
+            &report.security_locks,
+            &report.hardware_tests,
+        );
+    }
+
     /// Saves an inspection report into the local SQLite database.
     pub async fn save_inspection(
         &self,

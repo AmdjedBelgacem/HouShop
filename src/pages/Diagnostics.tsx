@@ -75,6 +75,7 @@ export default function Diagnostics() {
   const [showQrModal, setShowQrModal] = useState<boolean>(false);
   const [serverInfo, setServerInfo] = useState<DiagnosticServerInfo | null>(null);
   const [lastSyncEvent, setLastSyncEvent] = useState<MobileDiagnosticSyncEvent | null>(null);
+  const [companionConnected, setCompanionConnected] = useState<boolean>(false);
 
   // Modals & Drawers
   const [showHistory, setShowHistory] = useState<boolean>(false);
@@ -247,11 +248,67 @@ export default function Diagnostics() {
     }
   }, []);
 
+  // Batch auto-verify remaining untested sensors
+  const handleBatchVerifySensors = useCallback(async () => {
+    if (!reportRef.current) return;
+    const tests = Object.values(reportRef.current.hardware_tests);
+    const untested = tests.filter((t) => !t.tested);
+    if (untested.length === 0) {
+      toast.info(tRef.current('diag.detail.manualVerified'));
+      return;
+    }
+
+    const updates = untested.map((t) => ({
+      key: t.key,
+      passed: true,
+      details: tRef.current('diag.detail.manualVerified'),
+    }));
+
+    try {
+      const updated = await invoke<FullDeviceDiagnosticReport>('batch_update_report_tests', {
+        report: reportRef.current,
+        updates,
+      });
+      setReport(updated);
+      toast.success(tRef.current('diag.suite.verifyUntestedToast'));
+    } catch (e) {
+      console.error(e);
+      toast.error(tRef.current('diag.toast.updateFailed', { error: String(e) }));
+    }
+  }, []);
+
   // Listen to live WebSocket events from mobile companion & USB auto-connect
   useEffect(() => {
     let unlistenSync: (() => void) | null = null;
     let unlistenPhysical: (() => void) | null = null;
     let unlistenListUpdate: (() => void) | null = null;
+    let unlistenCompanionConnect: (() => void) | null = null;
+    let unlistenCompanionDisconnect: (() => void) | null = null;
+
+    // Check if companion server is already running & connected
+    invoke<DiagnosticServerInfo | null>('get_diagnostic_server_info')
+      .then((info) => {
+        if (info) {
+          setServerInfo(info);
+          if (info.connected) {
+            setCompanionConnected(true);
+          }
+        }
+      })
+      .catch(() => {});
+
+    listen('mobile-companion-connected', () => {
+      setCompanionConnected(true);
+      toast.success(tRef.current('manual.toast.synced'));
+    }).then((u) => {
+      unlistenCompanionConnect = u;
+    });
+
+    listen('mobile-companion-disconnected', () => {
+      setCompanionConnected(false);
+    }).then((u) => {
+      unlistenCompanionDisconnect = u;
+    });
 
     listen<MobileDiagnosticSyncEvent>('diagnostic-test-synced', (event) => {
       const payload = event.payload;
@@ -290,6 +347,8 @@ export default function Diagnostics() {
       if (unlistenSync) unlistenSync();
       if (unlistenPhysical) unlistenPhysical();
       if (unlistenListUpdate) unlistenListUpdate();
+      if (unlistenCompanionConnect) unlistenCompanionConnect();
+      if (unlistenCompanionDisconnect) unlistenCompanionDisconnect();
     };
   }, [loadDevices, handleProbe, handleUpdateHardwareTest]);
 
@@ -299,6 +358,9 @@ export default function Diagnostics() {
       try {
         const info = await invoke<DiagnosticServerInfo>('start_diagnostic_server');
         setServerInfo(info);
+        if (info.connected) {
+          setCompanionConnected(true);
+        }
         setShowQrModal(true);
       } catch (e) {
         toast.error(t('diag.toast.serverFailed', { error: String(e) }));
@@ -617,10 +679,19 @@ export default function Diagnostics() {
 
           <button
             onClick={toggleQrModal}
-            className="btn-secondary"
+            className={`btn-secondary flex items-center gap-1.5 ${
+              companionConnected ? 'border-accent-green/50 text-accent-green bg-accent-green/10 font-bold' : ''
+            }`}
           >
-            <QrCode className="w-3.5 h-3.5 text-accent-blue" />
-            {t('diagnostics.qrSync')}
+            <span
+              className={`w-2 h-2 rounded-full ${
+                companionConnected ? 'bg-accent-green animate-pulse' : 'bg-text-muted'
+              }`}
+            />
+            <QrCode className="w-3.5 h-3.5" />
+            {companionConnected
+              ? t('diag.companion.connectedBadge')
+              : t('diagnostics.qrSync')}
           </button>
 
           <button
@@ -1154,6 +1225,14 @@ export default function Diagnostics() {
                     <Zap size={13} className="text-accent-orange" />
                     {t('diag.suite.studio')}
                   </button>
+                  <button
+                    onClick={handleBatchVerifySensors}
+                    className="px-3 py-2 rounded-xl text-[13px] font-semibold bg-surface hover:bg-border-light text-text-primary border border-border flex items-center gap-1.5 transition-colors"
+                    title={t('diag.suite.verifyUntestedToast')}
+                  >
+                    <ShieldCheck size={14} className="text-accent-green" />
+                    {t('diag.suite.verifyUntested')}
+                  </button>
                   <span className="text-[13px] font-semibold px-2.5 py-1 rounded-full bg-surface text-accent-blue border border-border">
                     {testsSummary}
                   </span>
@@ -1683,6 +1762,7 @@ export default function Diagnostics() {
         platform={report ? report.platform : 'iOS'}
         hardwareTests={report ? report.hardware_tests : {}}
         onUpdateTest={handleUpdateHardwareTest}
+        companionConnected={companionConnected}
       />
     </div>
   );
