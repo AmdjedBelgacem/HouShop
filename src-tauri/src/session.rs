@@ -21,7 +21,6 @@ pub const PUBLIC_COMMANDS: &[&str] = &[
 ];
 
 struct ActiveSession {
-    token: String,
     user: User,
 }
 
@@ -29,8 +28,8 @@ struct ActiveSession {
 pub struct SessionState(Mutex<Option<ActiveSession>>);
 
 impl SessionState {
-    pub fn start(&self, token: String, user: User) {
-        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(ActiveSession { token, user });
+    pub fn start(&self, user: User) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(ActiveSession { user });
     }
 
     pub fn end(&self) {
@@ -47,14 +46,6 @@ impl SessionState {
             .unwrap_or_else(|e| e.into_inner())
             .as_ref()
             .map(|s| s.user.clone())
-    }
-
-    pub fn token(&self) -> Option<String> {
-        self.0
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .as_ref()
-            .map(|s| s.token.clone())
     }
 }
 
@@ -105,7 +96,7 @@ mod tests {
         let s = SessionState::default();
         assert!(!is_allowed("get_products", &s));
         assert!(!is_allowed("execute_wipe", &s));
-        s.start("t".into(), user());
+        s.start(user());
         assert!(is_allowed("get_products", &s));
     }
 
@@ -120,10 +111,10 @@ mod tests {
     #[test]
     fn logout_blocks_again() {
         let s = SessionState::default();
-        s.start("t".into(), user());
+        s.start(user());
         s.end();
         assert!(!is_allowed("create_sale", &s));
-        assert!(s.user().is_none() && s.token().is_none());
+        assert!(s.user().is_none());
     }
 
     // End-to-end: real IPC requests through the same `guard` that lib.rs uses.
@@ -177,7 +168,7 @@ mod tests {
             assert_eq!(call(&w, "has_users").unwrap(), "true");
 
             // Signed in: the protected command now runs.
-            app.state::<SessionState>().start("t".into(), user());
+            app.state::<SessionState>().start(user());
             assert_eq!(call(&w, "get_products").unwrap(), "\"secret\"");
 
             // Signed out again: blocked again.

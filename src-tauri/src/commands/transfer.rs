@@ -12,6 +12,31 @@ use std::sync::Arc;
 use tauri::{AppHandle, State};
 use tokio::sync::Mutex;
 
+/// Whether the helper tools that talk to phones over USB are installed.
+/// Without them a phone is simply never detected, so the interface needs to
+/// say so instead of just showing "no phone connected".
+#[derive(serde::Serialize)]
+pub struct PhoneToolStatus {
+    /// `adb`, needed for Android and HarmonyOS phones.
+    pub adb: bool,
+    /// libimobiledevice (`idevice_id`, `ideviceinfo`), needed for iPhones.
+    pub ios: bool,
+}
+
+#[tauri::command]
+pub async fn get_phone_tool_status(
+    detector: State<'_, Arc<DeviceDetector>>,
+) -> Result<PhoneToolStatus, String> {
+    let detector = detector.inner().clone();
+    // `is_available` runs the tools synchronously, so keep it off the async threads.
+    tokio::task::spawn_blocking(move || PhoneToolStatus {
+        adb: detector.adb().is_available(),
+        ios: detector.ios().is_available(),
+    })
+    .await
+    .map_err(|e| format!("Tool check failed: {}", e))
+}
+
 #[tauri::command]
 pub async fn list_transfer_devices(
     detector: State<'_, Arc<DeviceDetector>>,
@@ -51,30 +76,28 @@ pub async fn scan_device_data(
         .await
         .ok_or_else(|| format!("Device {} not found", device_id))?;
 
-    let raw_categories = if device.is_virtual {
-        VirtualDeviceProvider::scan_categories(&device.id)
-    } else if device.platform == DevicePlatform::Android {
-        detector.adb().scan_categories(&device.id).await.unwrap_or_default()
+    let categories: Vec<CategoryScanResult> = if device.is_virtual || device.platform == DevicePlatform::Android {
+        let raw = if device.is_virtual {
+            VirtualDeviceProvider::scan_categories(&device.id)
+        } else {
+            detector.adb().scan_categories(&device.id).await.unwrap_or_default()
+        };
+        raw.into_iter()
+            .map(|(cat, count, bytes)| CategoryScanResult {
+                category: cat,
+                item_count: count,
+                total_bytes: bytes,
+                available: count > 0,
+                note: None,
+            })
+            .collect()
     } else {
+        // iPhone: counted from the phone itself; what can't be read says so.
         detector.ios().scan_categories(&device.id).await
     };
 
-    let mut categories = Vec::new();
-    let mut total_items = 0u64;
-    let mut total_bytes = 0u64;
-
-    for (cat, count, bytes) in raw_categories {
-        let available = count > 0;
-        total_items += count;
-        total_bytes += bytes;
-        categories.push(CategoryScanResult {
-            category: cat,
-            item_count: count,
-            total_bytes: bytes,
-            available,
-            note: None,
-        });
-    }
+    let total_items: u64 = categories.iter().map(|c| c.item_count).sum();
+    let total_bytes: u64 = categories.iter().map(|c| c.total_bytes).sum();
 
     Ok(DeviceDataSummary {
         device_id,

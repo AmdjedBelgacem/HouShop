@@ -43,8 +43,8 @@ impl IosProbe {
             .await
             .unwrap_or_default();
 
-        // 4. Query live GasGauge via idevicediagnostics
-        let (gas_cycles, gas_pct) = self.query_gas_gauge(udid).await;
+        // 4. Read the battery's own registers (cycles, capacities, serial)
+        let regs = self.query_battery_registers(udid).await;
 
         self.build_report(
             udid,
@@ -52,30 +52,26 @@ impl IosProbe {
             &battery_props,
             &disk_props,
             &raw_general,
-            gas_cycles,
-            gas_pct,
+            regs,
         )
     }
 
-    async fn query_gas_gauge(&self, udid: &str) -> (Option<u32>, Option<u8>) {
-        let tool = match &self.idevicediagnostics_path {
-            Some(p) => p,
-            None => return (None, None),
+    /// Reads the battery gauge straight from the phone's registry
+    /// (`idevicediagnostics ioregentry AppleSmartBattery`).
+    async fn query_battery_registers(&self, udid: &str) -> BatteryRegisters {
+        let Some(tool) = &self.idevicediagnostics_path else {
+            return BatteryRegisters::default();
         };
-
         let mut cmd = Command::new(tool);
         if !udid.is_empty() {
             cmd.arg("-u").arg(udid);
         }
-        cmd.args(["diagnostics", "GasGauge"]);
-        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-
-        let output = match cmd.output().await {
-            Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
-            _ => return (None, None),
-        };
-
-        parse_gas_gauge_xml(&output)
+        cmd.args(["ioregentry", "AppleSmartBattery"]);
+        cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        match cmd.output().await {
+            Ok(o) if o.status.success() => parse_battery_registers(&String::from_utf8_lossy(&o.stdout)),
+            _ => BatteryRegisters::default(),
+        }
     }
 
     async fn query_domain(
@@ -96,7 +92,13 @@ impl IosProbe {
         let output = cmd
             .output()
             .await
-            .map_err(|e| format!("Failed to execute ideviceinfo: {}", e))?;
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    "iPhone tools (libimobiledevice) are not installed on this computer, so the iPhone cannot be read. Install them, then reconnect the iPhone and tap Trust.".to_string()
+                } else {
+                    format!("Failed to execute ideviceinfo: {}", e)
+                }
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -122,22 +124,22 @@ impl IosProbe {
         battery_domain: &HashMap<String, String>,
         disk_domain: &HashMap<String, String>,
         raw_general: &str,
-        gas_cycles: Option<u32>,
-        gas_pct: Option<u8>,
+        regs: BatteryRegisters,
     ) -> Result<FullDeviceDiagnosticReport, String> {
         let device_name = general
             .get("DeviceName")
             .cloned()
             .unwrap_or_else(|| "iPhone".into());
+        // Without the model the report would be a guess, so fail instead.
         let product_type = general
             .get("ProductType")
             .cloned()
-            .unwrap_or_else(|| "iPhone17,2".into());
+            .ok_or_else(|| "The iPhone did not report its model. Unlock it, tap Trust, and try again.".to_string())?;
         let marketing_name = map_ios_model(&product_type);
         let os_version = general
             .get("ProductVersion")
             .cloned()
-            .unwrap_or_else(|| "18.0".into());
+            .unwrap_or_else(|| "Unknown".into());
         let serial_number = general.get("SerialNumber").cloned();
         let imei1 = general
             .get("InternationalMobileEquipmentIdentity")
@@ -156,81 +158,71 @@ impl IosProbe {
         let storage_total_bytes = disk_domain
             .get("TotalDiskCapacity")
             .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(256 * 1024 * 1024 * 1024);
+            .unwrap_or(0);
 
         let storage_free_bytes = disk_domain
             .get("TotalDataAvailable")
             .and_then(|v| v.parse::<u64>().ok())
-            .unwrap_or(174 * 1024 * 1024 * 1024);
+            .unwrap_or(0);
 
         // RAM estimation based on product type
         let ram_gb = estimate_ios_ram(&product_type);
 
-        // Battery Gas Gauge - Real cycle count & capacity
-        let design_capacity_mah = get_ios_design_capacity(&product_type);
-
-        let cycle_count = gas_cycles.unwrap_or_else(|| {
-            battery_domain
-                .get("CycleCount")
-                .and_then(|v| v.parse::<u32>().ok())
-                .unwrap_or(474)
-        });
-
-        // Live battery charge level & charging state
+        // Battery: read from the battery's own registers. Health is computed the
+        // way iOS does for "Maximum Capacity": current max capacity / design capacity.
         let current_charge_percentage = battery_domain
             .get("BatteryCurrentCapacity")
             .and_then(|v| v.parse::<u8>().ok());
-
         let is_charging = battery_domain
             .get("BatteryIsCharging")
             .map(|v| v == "true");
 
-        // Real health percentage based on cycle count degradation curve and gas gauge registers
-        let health_percentage = if cycle_count > 0 {
-            let rate = if product_type.starts_with("iPhone16") || product_type.starts_with("iPhone17") {
-                0.020f32
-            } else {
-                0.038f32
-            };
-            let loss = (cycle_count as f32 * rate).round() as u8;
-            let computed = 100u8.saturating_sub(loss);
-            if let Some(gp) = gas_pct {
-                if gp < 100 {
-                    gp.min(computed)
-                } else {
-                    computed
+        let cycle_count = regs
+            .cycle_count
+            .or_else(|| battery_domain.get("CycleCount").and_then(|v| v.parse::<u32>().ok()));
+
+        let (health_percentage, design_capacity_mah, actual_capacity_mah, estimated) =
+            match (regs.design_mah, regs.nominal_mah) {
+                (Some(design), Some(nominal)) if design > 0 && nominal > 0 => {
+                    let pct = ((nominal as f32 / design as f32) * 100.0).round().min(100.0) as u8;
+                    (pct, design, nominal, false)
                 }
-            } else {
-                computed
-            }
-        } else {
-            gas_pct.unwrap_or(100)
-        };
+                _ => {
+                    // The battery could not be read. Fall back to an estimate from the
+                    // cycle count and the model's design capacity, and say so.
+                    let design = regs.design_mah.unwrap_or_else(|| get_ios_design_capacity(&product_type));
+                    let cycles = cycle_count.unwrap_or(0);
+                    let rate = if product_type.starts_with("iPhone16") || product_type.starts_with("iPhone17") {
+                        0.020f32
+                    } else {
+                        0.038f32
+                    };
+                    let pct = 100u8.saturating_sub((cycles as f32 * rate).round() as u8);
+                    (pct, design, ((design as f32) * pct as f32 / 100.0).round() as u32, true)
+                }
+            };
 
-        let actual_capacity_mah =
-            ((design_capacity_mah as f32) * (health_percentage as f32 / 100.0)).round() as u32;
-
-        let battery_serial = battery_domain
-            .get("BatterySerialNumber")
-            .or_else(|| general.get("BatterySerialNumber"))
-            .cloned()
-            .or_else(|| Some("Apple OEM Li-ion Pack (Verified)".into()));
+        let battery_serial = regs
+            .serial
+            .clone()
+            .or_else(|| battery_domain.get("BatterySerialNumber").cloned())
+            .or_else(|| general.get("BatterySerialNumber").cloned());
 
         let battery = BatteryGasGauge {
             health_percentage,
-            cycle_count,
+            cycle_count: cycle_count.unwrap_or(0),
             design_capacity_mah,
             actual_capacity_mah,
-            temperature_celsius: 27.5,
-            serial_number: battery_serial,
-            manufacturer: Some("Apple / Desay Battery OEM".into()),
-            status: if health_percentage >= 80 {
-                ComponentStatus::Original
-            } else {
-                ComponentStatus::ReplacedOem
-            },
+            // iOS does not expose the battery temperature over USB.
+            temperature_celsius: None,
+            serial_number: battery_serial.clone(),
+            // The phone does not report who made the cell, and nothing here checks
+            // that the battery is genuine, so neither is claimed.
+            manufacturer: None,
+            status: ComponentStatus::Unknown,
             current_charge_percentage,
             is_charging,
+            estimated,
         };
 
         // Security & Carrier Locks
@@ -268,6 +260,9 @@ impl IosProbe {
         for (k, v) in battery_domain {
             combined_props.insert(k.clone(), v.clone());
         }
+        if let Some(serial) = &battery_serial {
+            combined_props.insert("BatterySerialNumber".into(), serial.clone());
+        }
         let parts_audit = audit_ios_parts(&combined_props);
 
         // Standard 28-point tests
@@ -304,33 +299,40 @@ impl IosProbe {
     }
 }
 
-fn parse_gas_gauge_xml(xml: &str) -> (Option<u32>, Option<u8>) {
-    let mut cycle_count = None;
-    let mut full_charge = None;
+/// What the battery's own registers report. Every field is optional: whatever
+/// could not be read stays `None` rather than being guessed.
+#[derive(Debug, Default, PartialEq)]
+pub(crate) struct BatteryRegisters {
+    pub cycle_count: Option<u32>,
+    /// Factory design capacity, mAh.
+    pub design_mah: Option<u32>,
+    /// Current maximum capacity, mAh (what iOS shows as "Maximum Capacity").
+    pub nominal_mah: Option<u32>,
+    pub serial: Option<String>,
+}
 
-    if let Some(pos) = xml.find("<key>CycleCount</key>") {
-        let rest = &xml[pos..];
-        if let Some(start) = rest.find("<integer>") {
-            if let Some(end) = rest[start + 9..].find("</integer>") {
-                if let Ok(c) = rest[start + 9..start + 9 + end].trim().parse::<u32>() {
-                    cycle_count = Some(c);
-                }
-            }
-        }
+/// Finds the value following `<key>NAME</key>` in the phone's XML plist output.
+fn plist_value<'a>(xml: &'a str, key: &str) -> Option<&'a str> {
+    let marker = format!("<key>{}</key>", key);
+    let rest = &xml[xml.find(&marker)? + marker.len()..];
+    let start = rest.find('<')?;
+    let tag_end = rest[start..].find('>')? + start;
+    let tag = &rest[start + 1..tag_end];
+    let close = format!("</{}>", tag);
+    let body_end = rest[tag_end + 1..].find(&close)? + tag_end + 1;
+    Some(rest[tag_end + 1..body_end].trim())
+}
+
+pub(crate) fn parse_battery_registers(xml: &str) -> BatteryRegisters {
+    let int = |k: &str| plist_value(xml, k).and_then(|v| v.parse::<u32>().ok());
+    BatteryRegisters {
+        cycle_count: int("CycleCount"),
+        design_mah: int("DesignCapacity"),
+        nominal_mah: int("NominalChargeCapacity"),
+        serial: plist_value(xml, "Serial")
+            .filter(|v| !v.is_empty())
+            .map(|v| v.to_string()),
     }
-
-    if let Some(pos) = xml.find("<key>FullChargeCapacity</key>") {
-        let rest = &xml[pos..];
-        if let Some(start) = rest.find("<integer>") {
-            if let Some(end) = rest[start + 9..].find("</integer>") {
-                if let Ok(f) = rest[start + 9..start + 9 + end].trim().parse::<u32>() {
-                    full_charge = Some((f.min(100)) as u8);
-                }
-            }
-        }
-    }
-
-    (cycle_count, full_charge)
 }
 
 fn extract_carrier_info(raw_text: &str) -> (Option<String>, bool) {
@@ -571,8 +573,18 @@ mod tests {
                 assert_eq!(report.model, "iPhone 16 Pro Max");
                 assert!(report.battery.cycle_count >= 470 && report.battery.cycle_count <= 490);
                 assert!(report.battery.health_percentage >= 85 && report.battery.health_percentage <= 95);
-                assert!(report.battery.actual_capacity_mah > 4000 && report.battery.actual_capacity_mah < 4685);
-                assert_eq!(report.battery.design_capacity_mah, 4685);
+                // Read from the battery's own registers, not estimated or looked up.
+                assert!(!report.battery.estimated);
+                assert_eq!(report.battery.design_capacity_mah, 4630);
+                assert!(report.battery.actual_capacity_mah > 3900 && report.battery.actual_capacity_mah <= 4630);
+                assert_eq!(
+                    report.battery.health_percentage as f32,
+                    (report.battery.actual_capacity_mah as f32 / 4630.0 * 100.0).round()
+                );
+                assert!(report.battery.temperature_celsius.is_none(), "iOS exposes no temperature");
+                assert!(report.battery.manufacturer.is_none());
+                let serial = report.battery.serial_number.clone().unwrap_or_default();
+                assert!(!serial.contains("Verified"), "invented serial: {serial}");
                 assert!(report.battery.current_charge_percentage.is_some());
                 assert!(!report.security_locks.carrier_locked);
                 assert_eq!(
@@ -594,5 +606,80 @@ mod tests {
                 panic!("Probe failed: {}", e);
             }
         }
+    }
+
+    // The shape of the real `idevicediagnostics ioregentry AppleSmartBattery` output.
+    const REGISTRY: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<plist version="1.0"><dict>
+<key>IORegistry</key><dict>
+ <key>BatteryData</key><dict>
+  <key>AppleRawMaxCapacity</key><integer>4283</integer>
+  <key>DesignCapacity</key><integer>4630</integer>
+  <key>NominalChargeCapacity</key><integer>4180</integer>
+ </dict>
+ <key>FedDesignCapacity</key><integer>700</integer>
+ <key>CycleCount</key><integer>475</integer>
+ <key>Serial</key><string>F5DHC100TDG0000UMH</string>
+</dict></dict></plist>"#;
+
+    #[test]
+    fn reads_battery_registers() {
+        let r = parse_battery_registers(REGISTRY);
+        assert_eq!(r.cycle_count, Some(475));
+        assert_eq!(r.design_mah, Some(4630));
+        assert_eq!(r.nominal_mah, Some(4180));
+        assert_eq!(r.serial.as_deref(), Some("F5DHC100TDG0000UMH"));
+    }
+
+    #[test]
+    fn missing_registers_stay_unknown() {
+        assert_eq!(parse_battery_registers("<plist></plist>"), BatteryRegisters::default());
+    }
+
+    fn general() -> HashMap<String, String> {
+        let mut m = HashMap::new();
+        m.insert("ProductType".into(), "iPhone17,2".into());
+        m.insert("DeviceName".into(), "Test".into());
+        m
+    }
+
+    #[test]
+    fn health_is_measured_like_ios_maximum_capacity() {
+        let probe = IosProbe::new();
+        let report = probe
+            .build_report("U", &general(), &HashMap::new(), &HashMap::new(), "", parse_battery_registers(REGISTRY))
+            .unwrap();
+        let b = &report.battery;
+        assert!(!b.estimated);
+        assert_eq!((b.design_capacity_mah, b.actual_capacity_mah), (4630, 4180));
+        assert_eq!(b.health_percentage, 90); // 4180 / 4630
+        assert_eq!(b.cycle_count, 475);
+        assert_eq!(b.serial_number.as_deref(), Some("F5DHC100TDG0000UMH"));
+        assert!(b.temperature_celsius.is_none() && b.manufacturer.is_none());
+        // The real serial is kept in the parts audit, but not called genuine.
+        assert_eq!(report.parts_audit.battery.read_serial.as_deref(), Some("F5DHC100TDG0000UMH"));
+        assert!(!report.parts_audit.battery.is_original);
+    }
+
+    #[test]
+    fn unreadable_battery_is_labelled_an_estimate_not_a_reading() {
+        let probe = IosProbe::new();
+        let report = probe
+            .build_report("U", &general(), &HashMap::new(), &HashMap::new(), "", BatteryRegisters::default())
+            .unwrap();
+        assert!(report.battery.estimated);
+        assert!(report.battery.serial_number.is_none(), "no invented serial");
+        assert!(report.battery.manufacturer.is_none());
+        // Storage that couldn't be read is 0 (unknown), not an invented size.
+        assert_eq!((report.storage_total_bytes, report.storage_free_bytes), (0, 0));
+    }
+
+    #[test]
+    fn unknown_model_is_an_error_not_a_guess() {
+        let probe = IosProbe::new();
+        let err = probe
+            .build_report("U", &HashMap::new(), &HashMap::new(), &HashMap::new(), "", BatteryRegisters::default())
+            .unwrap_err();
+        assert!(err.contains("model"), "{err}");
     }
 }

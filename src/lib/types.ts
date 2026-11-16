@@ -538,12 +538,15 @@ export interface BatteryGasGauge {
   cycle_count: number;
   design_capacity_mah: number;
   actual_capacity_mah: number;
-  temperature_celsius: number;
+  /** null when the device doesn't expose a battery temperature. */
+  temperature_celsius: number | null;
   serial_number?: string | null;
   manufacturer?: string | null;
   status: ComponentStatus;
   current_charge_percentage?: number | null;
   is_charging?: boolean | null;
+  /** True when health/capacity couldn't be read and were estimated from cycles. */
+  estimated?: boolean;
 }
 
 export interface SecurityLockStatus {
@@ -578,6 +581,10 @@ export interface GradingResult {
   valuation_multiplier: number;
   summary: string;
   defects: string[];
+  /** Hardware tests not run yet; they don't lower the score. */
+  pending_tests?: number;
+  /** True while tests are pending: the grade is an estimate, capped at B. */
+  provisional?: boolean;
 }
 
 export interface FullDeviceDiagnosticReport {

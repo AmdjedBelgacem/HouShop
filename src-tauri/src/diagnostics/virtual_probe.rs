@@ -29,12 +29,13 @@ fn generate_iphone_15_pro() -> FullDeviceDiagnosticReport {
         cycle_count: 94,
         design_capacity_mah: 3274,
         actual_capacity_mah: 3180,
-        temperature_celsius: 27.2,
+        temperature_celsius: Some(27.2),
         serial_number: Some("F8Y34107A800P019".into()),
         manufacturer: Some("Desay High-Density OEM".into()),
         status: ComponentStatus::Original,
         current_charge_percentage: Some(88),
         is_charging: Some(false),
+        estimated: false,
     };
 
     let original_item = |name: &str, sn: &str, note: &str| PartAuditItem {
@@ -128,12 +129,13 @@ fn generate_galaxy_s24_ultra() -> FullDeviceDiagnosticReport {
         cycle_count: 210,
         design_capacity_mah: 5000,
         actual_capacity_mah: 4620,
-        temperature_celsius: 29.1,
+        temperature_celsius: Some(29.1),
         serial_number: Some("AA1R109AS/7-B".into()),
         manufacturer: Some("Samsung SDI Co., Ltd.".into()),
         status: ComponentStatus::Original,
         current_charge_percentage: Some(65),
         is_charging: Some(true),
+        estimated: false,
     };
 
     let original_item = |name: &str, sn: &str, note: &str| PartAuditItem {
@@ -227,12 +229,13 @@ fn generate_huawei_p60_pro() -> FullDeviceDiagnosticReport {
         cycle_count: 480,
         design_capacity_mah: 4815,
         actual_capacity_mah: 4050,
-        temperature_celsius: 31.0,
+        temperature_celsius: Some(31.0),
         serial_number: Some("HB486586ECW".into()),
         manufacturer: Some("Huawei Technologies Co., Ltd.".into()),
         status: ComponentStatus::Original,
         current_charge_percentage: Some(42),
         is_charging: Some(false),
+        estimated: false,
     };
 
     let parts_audit = PartsAuditReport {
@@ -335,12 +338,13 @@ fn generate_defective_iphone() -> FullDeviceDiagnosticReport {
         cycle_count: 1140,
         design_capacity_mah: 3095,
         actual_capacity_mah: 2260,
-        temperature_celsius: 36.8,
+        temperature_celsius: Some(36.8),
         serial_number: Some("F8Y11029481A".into()),
         manufacturer: Some("Desay (Degraded)".into()),
         status: ComponentStatus::Defective,
         current_charge_percentage: Some(19),
         is_charging: Some(false),
+        estimated: false,
     };
 
     let parts_audit = PartsAuditReport {

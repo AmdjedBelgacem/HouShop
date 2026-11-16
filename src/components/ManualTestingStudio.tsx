@@ -361,7 +361,7 @@ export const ManualTestingStudio: React.FC<ManualTestingStudioProps> = ({
                             )
                           }
                           className={`px-3 py-1.5 rounded-lg text-[13px] font-bold flex items-center gap-1.5 transition-colors ${
-                            hardwareTests['earpiece_speaker'] && !hardwareTests['earpiece_speaker'].passed
+                            hardwareTests['earpiece_speaker']?.tested && !hardwareTests['earpiece_speaker'].passed
                               ? 'bg-accent-red text-white font-bold'
                               : 'bg-accent-red/20 text-accent-red hover:bg-accent-red/30'
                           }`}
@@ -431,7 +431,7 @@ export const ManualTestingStudio: React.FC<ManualTestingStudioProps> = ({
                             )
                           }
                           className={`px-3 py-1.5 rounded-lg text-[13px] font-bold flex items-center gap-1.5 transition-colors ${
-                            hardwareTests['bottom_loudspeaker'] && !hardwareTests['bottom_loudspeaker'].passed
+                            hardwareTests['bottom_loudspeaker']?.tested && !hardwareTests['bottom_loudspeaker'].passed
                               ? 'bg-accent-red text-white font-bold'
                               : 'bg-accent-red/20 text-accent-red hover:bg-accent-red/30'
                           }`}
@@ -505,7 +505,7 @@ export const ManualTestingStudio: React.FC<ManualTestingStudioProps> = ({
                           onUpdateTest('main_microphone', false, t('manual.detail.mainFail'))
                         }
                         className={`px-2.5 py-1 rounded text-[13px] font-bold ${
-                          hardwareTests['main_microphone'] && !hardwareTests['main_microphone'].passed
+                          hardwareTests['main_microphone']?.tested && !hardwareTests['main_microphone'].passed
                             ? 'bg-accent-red text-white font-bold'
                             : 'bg-surface text-text-muted hover:bg-accent-red/20 hover:text-accent-red'
                         }`}
@@ -538,7 +538,7 @@ export const ManualTestingStudio: React.FC<ManualTestingStudioProps> = ({
                           onUpdateTest('noise_mic', false, t('manual.detail.noiseFail'))
                         }
                         className={`px-2.5 py-1 rounded text-[13px] font-bold ${
-                          hardwareTests['noise_mic'] && !hardwareTests['noise_mic'].passed
+                          hardwareTests['noise_mic']?.tested && !hardwareTests['noise_mic'].passed
                             ? 'bg-accent-red text-white font-bold'
                             : 'bg-surface text-text-muted hover:bg-accent-red/20 hover:text-accent-red'
                         }`}
@@ -606,7 +606,7 @@ export const ManualTestingStudio: React.FC<ManualTestingStudioProps> = ({
                         onUpdateTest('force_touch', false, t('manual.detail.hapticFail'))
                       }
                       className={`px-3 py-1.5 rounded-lg text-[13px] font-bold flex items-center gap-1.5 transition-colors ${
-                        hardwareTests['force_touch'] && !hardwareTests['force_touch'].passed
+                        hardwareTests['force_touch']?.tested && !hardwareTests['force_touch'].passed
                           ? 'bg-accent-red text-white font-bold'
                           : 'bg-accent-red/20 text-accent-red hover:bg-accent-red/30'
                       }`}
@@ -713,7 +713,7 @@ export const ManualTestingStudio: React.FC<ManualTestingStudioProps> = ({
                           <button
                             onClick={() => onUpdateTest(cam.key, false, t('manual.detail.lensFail', { name: cam.name }))}
                             className={`px-2.5 py-1 rounded text-[13px] font-bold transition-colors ${
-                              testItem && !testItem.passed
+                              testItem?.tested && !testItem.passed
                                 ? 'bg-accent-red text-white font-bold'
                                 : 'bg-surface text-text-muted hover:bg-accent-red/20 hover:text-accent-red'
                             }`}
@@ -787,7 +787,7 @@ export const ManualTestingStudio: React.FC<ManualTestingStudioProps> = ({
                             )
                           }
                           className={`px-3 py-1.5 rounded-lg text-[13px] font-bold flex items-center gap-1.5 transition-colors ${
-                            hardwareTests['touch_matrix'] && !hardwareTests['touch_matrix'].passed
+                            hardwareTests['touch_matrix']?.tested && !hardwareTests['touch_matrix'].passed
                               ? 'bg-accent-red text-white font-bold'
                               : 'bg-accent-red/20 text-accent-red hover:bg-accent-red/30'
                           }`}
@@ -853,7 +853,7 @@ export const ManualTestingStudio: React.FC<ManualTestingStudioProps> = ({
                             )
                           }
                           className={`px-3 py-1.5 rounded-lg text-[13px] font-bold flex items-center gap-1.5 transition-colors ${
-                            hardwareTests['display_rgbw'] && !hardwareTests['display_rgbw'].passed
+                            hardwareTests['display_rgbw']?.tested && !hardwareTests['display_rgbw'].passed
                               ? 'bg-accent-red text-white font-bold'
                               : 'bg-accent-red/20 text-accent-red hover:bg-accent-red/30'
                           }`}

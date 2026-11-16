@@ -1,6 +1,6 @@
 use super::types::{
-    ConnectionType, DeviceCapabilities, DeviceConnectionState, DeviceInfo, DevicePlatform,
-    TransferCategory,
+    CategoryScanResult, ConnectionType, DeviceCapabilities, DeviceConnectionState, DeviceInfo,
+    DevicePlatform, TransferCategory,
 };
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -11,6 +11,8 @@ pub struct IosManager {
     idevice_id_path: PathBuf,
     idevicepair_path: PathBuf,
     ideviceinfo_path: PathBuf,
+    /// Reads the phone's media folders over USB (read-only use only).
+    afcclient_path: Option<PathBuf>,
 }
 
 impl IosManager {
@@ -20,11 +22,13 @@ impl IosManager {
         let ideviceinfo_path = resolve_tool("ideviceinfo").unwrap_or_else(|| PathBuf::from("ideviceinfo"));
 
         let tools_available = is_tool_executable(&idevice_id_path) || is_tool_executable(&ideviceinfo_path);
+        let afcclient_path = resolve_tool("afcclient");
         Self {
             tools_available,
             idevice_id_path,
             idevicepair_path,
             ideviceinfo_path,
+            afcclient_path,
         }
     }
 
@@ -78,8 +82,9 @@ impl IosManager {
             let mut model = "iPhone".to_string();
             let mut os_version = "iOS".to_string();
             let mut battery = None;
-            let mut storage_total = 128 * 1024 * 1024 * 1024;
-            let mut storage_free = 64 * 1024 * 1024 * 1024;
+            // 0 means "unknown": never show invented storage figures.
+            let mut storage_total: u64 = 0;
+            let mut storage_free: u64 = 0;
 
             if let Ok(info_out) = Command::new(&self.ideviceinfo_path).args(["-u", udid]).output().await {
                 if info_out.status.success() {
@@ -92,20 +97,23 @@ impl IosManager {
                                 "DeviceName" => name = val.to_string(),
                                 "ProductType" => model = map_product_type_to_model(val),
                                 "ProductVersion" => os_version = format!("iOS {}", val),
-                                "TotalDiskCapacity" => {
-                                    if let Ok(b) = val.parse::<u64>() {
-                                        storage_total = b;
-                                    }
-                                }
-                                "TotalDataAvailable" => {
-                                    if let Ok(b) = val.parse::<u64>() {
-                                        storage_free = b;
-                                    }
-                                }
                                 _ => {}
                             }
                         }
                     }
+                }
+            }
+
+            // Storage lives in the disk-usage section, not the default one.
+            if let Ok(disk_out) = Command::new(&self.ideviceinfo_path)
+                .args(["-u", udid, "-q", "com.apple.disk_usage"])
+                .output()
+                .await
+            {
+                if disk_out.status.success() {
+                    let (total, free) = parse_disk_usage(&String::from_utf8_lossy(&disk_out.stdout));
+                    storage_total = total;
+                    storage_free = free;
                 }
             }
 
@@ -149,62 +157,192 @@ impl IosManager {
         Ok(devices)
     }
 
-    /// Scans item categories on the iOS device.
-    pub async fn scan_categories(&self, udid: &str) -> Vec<(TransferCategory, u64, u64)> {
-        // Query disk usage to get realistic category sizing
-        let mut total_used_bytes: u64 = 68 * 1024 * 1024 * 1024;
-        if let Ok(info_out) = Command::new(&self.ideviceinfo_path)
-            .args(["-u", udid, "-q", "com.apple.disk_usage"])
-            .output()
+    /// Reads one folder on the phone with `afcclient ls -l`. Read-only: this is
+    /// the only afcclient command the app ever runs.
+    async fn afc_ls(&self, udid: &str, path: &str) -> Result<Vec<AfcEntry>, String> {
+        let afc = self
+            .afcclient_path
+            .as_ref()
+            .ok_or_else(|| "afcclient not installed".to_string())?;
+        let run = Command::new(afc)
+            .args(["-u", udid, "--", "ls", "-l", path])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .output();
+        let output = tokio::time::timeout(std::time::Duration::from_secs(60), run)
             .await
-        {
-            if info_out.status.success() {
-                let text = String::from_utf8_lossy(&info_out.stdout);
-                let mut total_cap = 0u64;
-                let mut avail = 0u64;
-                for line in text.lines() {
-                    if let Some((k, v)) = line.split_once(':') {
-                        let key = k.trim();
-                        let val = v.trim();
-                        if key == "TotalDataCapacity" {
-                            if let Ok(b) = val.parse::<u64>() {
-                                total_cap = b;
-                            }
-                        } else if key == "TotalDataAvailable" {
-                            if let Ok(b) = val.parse::<u64>() {
-                                avail = b;
+            .map_err(|_| format!("Reading {} timed out", path))?
+            .map_err(|e| format!("Failed to run afcclient: {}", e))?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        }
+        Ok(parse_afc_ls_long(&String::from_utf8_lossy(&output.stdout)))
+    }
+
+    /// Counts what is really on the phone. Photos and videos come from the media
+    /// folder (exact counts and sizes); voice recordings from their folder.
+    /// Contacts, messages, calls, calendars and documents can't be read over USB
+    /// without a full backup, so they are reported as unavailable, never invented.
+    pub async fn scan_categories(&self, udid: &str) -> Vec<CategoryScanResult> {
+        let unreadable = |note: &str| CategoryScanResult {
+            category: TransferCategory::Photos,
+            item_count: 0,
+            total_bytes: 0,
+            available: false,
+            note: Some(note.to_string()),
+        };
+        let needs_backup = |cat: TransferCategory| CategoryScanResult {
+            category: cat,
+            item_count: 0,
+            total_bytes: 0,
+            available: false,
+            note: Some("needs_backup".into()),
+        };
+
+        let mut photos = (0u64, 0u64);
+        let mut videos = (0u64, 0u64);
+        let mut media_note: Option<String> = None;
+
+        match self.afc_ls(udid, "/DCIM").await {
+            Ok(folders) => {
+                for dir in folders.iter().filter(|e| e.is_dir && !e.name.starts_with('.')) {
+                    match self.afc_ls(udid, &format!("/DCIM/{}", dir.name)).await {
+                        Ok(files) => {
+                            for f in files.iter().filter(|f| !f.is_dir) {
+                                match media_kind(&f.name) {
+                                    Some(MediaKind::Photo) => {
+                                        photos.0 += 1;
+                                        photos.1 += f.size;
+                                    }
+                                    Some(MediaKind::Video) => {
+                                        videos.0 += 1;
+                                        videos.1 += f.size;
+                                    }
+                                    _ => {}
+                                }
                             }
                         }
+                        Err(_) => media_note = Some("unreadable".into()),
                     }
                 }
-                if total_cap > avail && avail > 0 {
-                    total_used_bytes = total_cap - avail;
+            }
+            Err(e) => {
+                eprintln!("iOS media scan failed for {}: {}", udid, e);
+                media_note = Some(if self.afcclient_path.is_none() { "tools_missing" } else { "unreadable" }.into());
+            }
+        }
+
+        // Voice memos. A phone with none has no such folder, which is not an error.
+        let mut audio = (0u64, 0u64);
+        if let Ok(files) = self.afc_ls(udid, "/Recordings").await {
+            for f in files.iter().filter(|f| !f.is_dir) {
+                if matches!(media_kind(&f.name), Some(MediaKind::Audio)) {
+                    audio.0 += 1;
+                    audio.1 += f.size;
                 }
             }
         }
 
-        // Allocate proportional sizes based on actual disk usage
-        let photo_bytes = (total_used_bytes as f64 * 0.55) as u64;
-        let video_bytes = (total_used_bytes as f64 * 0.30) as u64;
-        let audio_bytes = (total_used_bytes as f64 * 0.05) as u64;
-        let docs_bytes = (total_used_bytes as f64 * 0.08) as u64;
-
-        let photo_count = (photo_bytes / (3 * 1024 * 1024)).max(120);
-        let video_count = (video_bytes / (85 * 1024 * 1024)).max(15);
-        let audio_count = (audio_bytes / (8 * 1024 * 1024)).max(25);
-        let docs_count = (docs_bytes / (2 * 1024 * 1024)).max(30);
-
-        vec![
-            (TransferCategory::Photos, photo_count, photo_bytes),
-            (TransferCategory::Videos, video_count, video_bytes),
-            (TransferCategory::Contacts, 680, 680 * 512),
-            (TransferCategory::Audio, audio_count, audio_bytes),
-            (TransferCategory::Documents, docs_count, docs_bytes),
-            (TransferCategory::Calendars, 85, 85 * 1024),
-            (TransferCategory::Messages, 0, 0),
-            (TransferCategory::Calls, 0, 0),
-        ]
+        let mut out = Vec::new();
+        let media = |cat: TransferCategory, (count, bytes): (u64, u64), note: &Option<String>| CategoryScanResult {
+            category: cat,
+            item_count: count,
+            total_bytes: bytes,
+            available: count > 0,
+            note: if count > 0 { None } else { note.clone() },
+        };
+        if media_note.is_some() && photos.0 == 0 && videos.0 == 0 {
+            let mut p = unreadable(media_note.as_deref().unwrap_or("unreadable"));
+            p.category = TransferCategory::Photos;
+            let mut v = unreadable(media_note.as_deref().unwrap_or("unreadable"));
+            v.category = TransferCategory::Videos;
+            out.push(p);
+            out.push(v);
+        } else {
+            out.push(media(TransferCategory::Photos, photos, &None));
+            out.push(media(TransferCategory::Videos, videos, &None));
+        }
+        out.push(CategoryScanResult {
+            category: TransferCategory::Audio,
+            item_count: audio.0,
+            total_bytes: audio.1,
+            available: audio.0 > 0,
+            note: Some("voice_memos_only".into()),
+        });
+        out.push(needs_backup(TransferCategory::Contacts));
+        out.push(needs_backup(TransferCategory::Messages));
+        out.push(needs_backup(TransferCategory::Calls));
+        out.push(needs_backup(TransferCategory::Calendars));
+        out.push(needs_backup(TransferCategory::Documents));
+        out
     }
+}
+
+/// One line of `afcclient ls -l`.
+#[derive(Debug, PartialEq)]
+pub(crate) struct AfcEntry {
+    pub name: String,
+    pub size: u64,
+    pub is_dir: bool,
+}
+
+/// Parses `afcclient ls -l` output, e.g.
+/// `-rw-r--r--    1 mobile mobile     122940 02 Nov 2026 16:05:12 IMG_9153.JPG`
+pub(crate) fn parse_afc_ls_long(text: &str) -> Vec<AfcEntry> {
+    text.lines()
+        .filter_map(|line| {
+            let t: Vec<&str> = line.split_whitespace().collect();
+            if t.len() < 10 {
+                return None;
+            }
+            let perms = t[0];
+            let kind = perms.chars().next()?;
+            if perms.len() != 10 || !matches!(kind, '-' | 'd' | 'l') {
+                return None;
+            }
+            Some(AfcEntry {
+                size: t[4].parse::<u64>().ok()?,
+                name: t[9..].join(" "),
+                is_dir: kind == 'd',
+            })
+        })
+        .collect()
+}
+
+#[derive(Debug, PartialEq)]
+pub(crate) enum MediaKind {
+    Photo,
+    Video,
+    Audio,
+}
+
+pub(crate) fn media_kind(name: &str) -> Option<MediaKind> {
+    let ext = name.rsplit_once('.')?.1.to_ascii_lowercase();
+    match ext.as_str() {
+        "jpg" | "jpeg" | "heic" | "heif" | "png" | "gif" | "dng" | "tif" | "tiff" | "webp" => {
+            Some(MediaKind::Photo)
+        }
+        "mov" | "mp4" | "m4v" => Some(MediaKind::Video),
+        "m4a" | "caf" | "wav" | "mp3" | "aac" | "aif" | "aiff" => Some(MediaKind::Audio),
+        _ => None,
+    }
+}
+
+/// `(total_bytes, free_bytes)` from the phone's disk-usage section; 0 when absent.
+pub(crate) fn parse_disk_usage(text: &str) -> (u64, u64) {
+    let (mut total, mut free) = (0u64, 0u64);
+    for line in text.lines() {
+        if let Some((k, v)) = line.split_once(':') {
+            match k.trim() {
+                "TotalDiskCapacity" => total = v.trim().parse().unwrap_or(0),
+                "TotalDataAvailable" => free = v.trim().parse().unwrap_or(0),
+                _ => {}
+            }
+        }
+    }
+    (total, free)
 }
 
 fn map_product_type_to_model(pt: &str) -> String {
@@ -271,4 +409,74 @@ fn is_tool_executable(path: &PathBuf) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Lines copied from a real iPhone 16 Pro Max.
+    const SAMPLE: &str = "\
+-rw-r--r--    1 mobile mobile     122940 02 Nov 2026 16:05:12 IMG_9153.JPG
+-rw-r--r--    1 mobile mobile     720071 12 Nov 2026 15:33:50 IMG_9233.HEIC
+-rw-r--r--    1 mobile mobile    4014037 14 Nov 2026 00:39:39 IMG_9246.MP4
+-rw-r--r--    1 mobile mobile       1560 14 Nov 2026 00:39:40 IMG_9246.AAE
+drwxr-xr-x    2 mobile mobile         64 02 Nov 2026 16:05:12 .MISC
+";
+
+    #[test]
+    fn parses_real_afc_listing_with_sizes() {
+        let e = parse_afc_ls_long(SAMPLE);
+        assert_eq!(e.len(), 5);
+        assert_eq!(e[0], AfcEntry { name: "IMG_9153.JPG".into(), size: 122940, is_dir: false });
+        assert_eq!(e[2].size, 4014037);
+        assert!(e[4].is_dir && e[4].name == ".MISC");
+    }
+
+    #[test]
+    fn ignores_noise_lines() {
+        assert!(parse_afc_ls_long("afcclient: error\n\n109APPLE\n").is_empty());
+    }
+
+    #[test]
+    fn classifies_media_by_extension() {
+        assert_eq!(media_kind("IMG_1.HEIC"), Some(MediaKind::Photo));
+        assert_eq!(media_kind("a.jpg"), Some(MediaKind::Photo));
+        assert_eq!(media_kind("clip.MOV"), Some(MediaKind::Video));
+        assert_eq!(media_kind("Memo 1.m4a"), Some(MediaKind::Audio));
+        assert_eq!(media_kind("IMG_1.AAE"), None);
+        assert_eq!(media_kind("noextension"), None);
+    }
+
+    #[test]
+    fn reads_storage_from_the_disk_usage_section() {
+        // Real values from the phone; note the default section has no such keys.
+        let text = "AmountDataAvailable: 2940096512\nTotalDataAvailable: 177439203328\nTotalDataCapacity: 245458432000\nTotalDiskCapacity: 256000000000\n";
+        assert_eq!(parse_disk_usage(text), (256_000_000_000, 177_439_203_328));
+        // Missing keys mean unknown (0), never an invented 128 GB.
+        assert_eq!(parse_disk_usage("DeviceName: x\n"), (0, 0));
+    }
+
+    /// With a real iPhone attached, the scan must report what is on it: real
+    /// photo and video counts, and no invented contacts/calendars.
+    #[tokio::test]
+    async fn real_iphone_scan_is_not_fabricated() {
+        let mgr = IosManager::new();
+        let devices = mgr.list_devices().await.unwrap_or_default();
+        let Some(dev) = devices.iter().find(|d| d.connection_state == DeviceConnectionState::Connected) else {
+            println!("no trusted iPhone attached: skipped");
+            return;
+        };
+        println!("storage: {} total, {} free", dev.storage_total_bytes, dev.storage_free_bytes);
+        assert_ne!(dev.storage_total_bytes, 128 * 1024 * 1024 * 1024, "invented default");
+        let cats = mgr.scan_categories(&dev.id).await;
+        for c in &cats {
+            println!("{:?}: {} items, {} bytes, available={}, note={:?}", c.category, c.item_count, c.total_bytes, c.available, c.note);
+        }
+        let get = |cat: TransferCategory| cats.iter().find(|c| c.category == cat).unwrap();
+        assert!(!get(TransferCategory::Contacts).available);
+        assert_eq!(get(TransferCategory::Contacts).item_count, 0);
+        assert_ne!(get(TransferCategory::Calendars).item_count, 85, "invented number");
+        assert_ne!(get(TransferCategory::Contacts).item_count, 680, "invented number");
+    }
 }

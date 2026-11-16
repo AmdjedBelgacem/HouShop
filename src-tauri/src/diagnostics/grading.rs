@@ -416,6 +416,7 @@ pub fn calculate_device_grading(
 
     // 4. Hardware Tests Evaluation
     let mut passed_count = 0;
+    let mut pending_tests: usize = 0;
     let total_count = hardware_tests.len().max(1);
 
     for (key, test) in hardware_tests {
@@ -434,16 +435,11 @@ pub fn calculate_device_grading(
                     | "face_id_or_touch_id"
             );
 
-            // A test that was never run is not a pass. It costs less than a failed test,
-            // but it is still a defect, so the device cannot reach A+ without full testing.
+            // A test that has not been run yet is neither a pass nor a failure. It
+            // does not lower the score (the phone has not been shown to be bad), but
+            // it keeps the grade provisional and capped until it is done.
             if !test.tested {
-                if is_critical {
-                    total_score -= 6.0;
-                    defects.push(format!("CRITICAL: {} not tested", test.name));
-                } else {
-                    total_score -= 2.0;
-                    defects.push(format!("Not tested: {}", test.name));
-                }
+                pending_tests += 1;
             } else if is_critical {
                 total_score -= 12.0;
                 defects.push(format!("CRITICAL: {} test failed", test.name));
@@ -478,6 +474,17 @@ pub fn calculate_device_grading(
         (DeviceGrade::Defective, 0.20)
     };
 
+    let provisional = pending_tests > 0;
+    // Until the hardware tests are done the grade is an estimate, so it can't be
+    // better than B (and the suggested trade-in value follows).
+    let (grade, valuation_multiplier) = if provisional
+        && matches!(grade, DeviceGrade::APlus | DeviceGrade::A)
+    {
+        (DeviceGrade::B, 0.75)
+    } else {
+        (grade, valuation_multiplier)
+    };
+
     let summary = match grade {
         DeviceGrade::APlus => {
             "Pristine Condition: 100% original OEM parts, peak battery health, passed all sensor audits."
@@ -509,6 +516,8 @@ pub fn calculate_device_grading(
         valuation_multiplier,
         summary,
         defects,
+        pending_tests,
+        provisional,
     }
 }
 
@@ -523,12 +532,13 @@ mod tests {
             cycle_count: 85,
             design_capacity_mah: 3274,
             actual_capacity_mah: 3210,
-            temperature_celsius: 28.5,
+            temperature_celsius: Some(28.5),
             serial_number: Some("F8Y314781A0J9Q1AX".into()),
             manufacturer: Some("Desay".into()),
             status: ComponentStatus::Original,
             current_charge_percentage: Some(85),
             is_charging: Some(false),
+            estimated: false,
         }
     }
 
@@ -620,5 +630,53 @@ mod tests {
         assert!(res.grade == DeviceGrade::A || res.grade == DeviceGrade::B);
         assert_ne!(res.grade, DeviceGrade::APlus);
         assert!(res.defects.iter().any(|d| d.contains("aftermarket")));
+    }
+
+    /// Regression: a healthy phone read over USB, with none of the interactive
+    /// hardware tests run yet, was graded "Defective" (score 16).
+    #[test]
+    fn untested_healthy_phone_is_provisional_not_defective() {
+        let mut battery = make_perfect_battery();
+        battery.health_percentage = 90;
+        battery.cycle_count = 475;
+        let parts = make_clean_parts();
+        let locks = make_clean_locks();
+
+        // The standard tests exactly as a probe leaves them: none run.
+        let mut tests_map = HashMap::new();
+        for t in get_standard_28_tests() {
+            assert!(!t.tested && !t.passed);
+            tests_map.insert(t.key.clone(), t);
+        }
+
+        let res = calculate_device_grading(&battery, &parts, &locks, &tests_map);
+        assert_eq!(res.pending_tests, 28);
+        assert!(res.provisional);
+        assert_ne!(res.grade, DeviceGrade::Defective);
+        assert!(res.score >= 85, "score was {}", res.score);
+        // Never better than B until the tests are done, so it can't be priced as A+.
+        assert!(matches!(res.grade, DeviceGrade::B | DeviceGrade::C));
+        assert!(res.valuation_multiplier <= 0.75);
+        // Not-yet-run tests are listed as pending, not as defects.
+        assert!(res.defects.iter().all(|d| !d.contains("not tested")));
+    }
+
+    #[test]
+    fn a_failed_test_still_lowers_the_grade() {
+        let battery = make_perfect_battery();
+        let parts = make_clean_parts();
+        let locks = make_clean_locks();
+        let mut tests_map = HashMap::new();
+        for mut t in simulated_standard_tests() {
+            if t.key == "touch_matrix" {
+                t.passed = false;
+                t.tested = true;
+            }
+            tests_map.insert(t.key.clone(), t);
+        }
+        let res = calculate_device_grading(&battery, &parts, &locks, &tests_map);
+        assert!(!res.provisional);
+        assert!(res.defects.iter().any(|d| d.contains("test failed")));
+        assert_ne!(res.grade, DeviceGrade::APlus);
     }
 }

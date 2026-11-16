@@ -22,7 +22,7 @@ pub async fn login(
         return Err("Invalid username or password".to_string());
     }
     let token = uuid::Uuid::new_v4().to_string();
-    session.start(token.clone(), user.clone());
+    session.start(user.clone());
     Ok(LoginResponse { user, token })
 }
 

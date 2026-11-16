@@ -1,3 +1,4 @@
+import PhoneToolsNotice from '../components/PhoneToolsNotice';
 import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { invoke } from '@tauri-apps/api/core';
@@ -263,19 +264,26 @@ export default function DataTransfer() {
     );
   };
 
+  // Only categories that were really found on the phone can be transferred.
+  const activeCategories = useMemo(() => {
+    if (!scanSummary) return selectedCategories;
+    const readable = new Set(scanSummary.categories.filter((c) => c.available).map((c) => c.category));
+    return selectedCategories.filter((c) => readable.has(c));
+  }, [scanSummary, selectedCategories]);
+
   // Calculate total selected size
   const selectedSizeMetrics = useMemo(() => {
     if (!scanSummary) return { count: 0, bytes: 0 };
     let count = 0;
     let bytes = 0;
     for (const c of scanSummary.categories) {
-      if (selectedCategories.includes(c.category)) {
+      if (activeCategories.includes(c.category)) {
         count += c.item_count;
         bytes += c.total_bytes;
       }
     }
     return { count, bytes };
-  }, [scanSummary, selectedCategories]);
+  }, [scanSummary, activeCategories]);
 
   // Target storage check
   const isStorageWarning = useMemo(() => {
@@ -292,7 +300,7 @@ export default function DataTransfer() {
       if (sourceDeviceId === targetDeviceId) {
         throw new Error(t('transfer.sameDeviceError'));
       }
-      if (selectedCategories.length === 0) {
+      if (activeCategories.length === 0) {
         throw new Error(t('transfer.noCategoriesSelected'));
       }
 
@@ -300,7 +308,7 @@ export default function DataTransfer() {
         req: {
           source_device_id: sourceDeviceId,
           target_device_id: targetDeviceId,
-          categories: selectedCategories,
+          categories: activeCategories,
         },
       });
       return session;
@@ -547,6 +555,8 @@ export default function DataTransfer() {
           <span className="badge bg-accent-green/15 text-accent-green">{t('xfer.liveUsbReady')}</span>
         </div>
       ) : (
+        <>
+        <PhoneToolsNotice />
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 py-3 rounded-2xl bg-accent-orange/10 border border-accent-orange/25 text-[13px] text-text-secondary">
           <div className="flex items-start gap-2.5">
             <AlertTriangle size={16} className="text-accent-orange flex-shrink-0 mt-0.5" />
@@ -562,6 +572,7 @@ export default function DataTransfer() {
             {t('xfer.scanUsb')}
           </button>
         </div>
+        </>
       )}
 
       {/* Transfer stage: source phone, data bridge, target phone */}
@@ -641,7 +652,7 @@ export default function DataTransfer() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setSelectedCategories(['contacts', 'messages', 'calls', 'calendars', 'photos', 'videos', 'audio', 'documents'])}
+                onClick={() => setSelectedCategories((scanSummary?.categories ?? []).filter((c) => c.available).map((c) => c.category))}
                 className="btn-secondary px-3.5 py-2 text-[13px]"
               >
                 {t('transfer.selectAll')}
@@ -667,8 +678,12 @@ export default function DataTransfer() {
           {/* Category checklist */}
           <div className="card divide-y divide-border-light overflow-hidden">
             {(scanSummary?.categories ?? []).map((cat) => {
-              const isSelected = selectedCategories.includes(cat.category);
+              const readable = cat.available;
+              const isSelected = readable && selectedCategories.includes(cat.category);
               const labelKey = `transfer.cat.${cat.category}` as const;
+              // Backend notes are short codes; show them in the interface language.
+              const noteKey = cat.note ? `xfer.note.${cat.note}` : null;
+              const noteText = noteKey ? t(noteKey) : null;
 
               return (
                 <button
@@ -676,8 +691,12 @@ export default function DataTransfer() {
                   type="button"
                   role="checkbox"
                   aria-checked={isSelected}
+                  aria-disabled={!readable}
+                  disabled={!readable}
                   onClick={() => toggleCategory(cat.category)}
-                  className="w-full flex items-center gap-4 px-5 py-4 text-left hover:bg-surface/60 transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-navy/30"
+                  className={`w-full flex items-center gap-4 px-5 py-4 text-start transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-navy/30 ${
+                    readable ? 'hover:bg-surface/60' : 'cursor-not-allowed opacity-60'
+                  }`}
                 >
                   <span
                     className={`h-5 w-5 rounded-md border flex items-center justify-center flex-shrink-0 transition-colors ${
@@ -691,20 +710,23 @@ export default function DataTransfer() {
                     {CATEGORY_ICONS[cat.category]}
                   </span>
 
-                  <span
-                    className={`flex-1 min-w-0 text-[14px] font-medium truncate ${
-                      isSelected ? 'text-text-primary' : 'text-text-secondary'
-                    }`}
-                  >
-                    {t(labelKey)}
+                  <span className="flex-1 min-w-0">
+                    <span
+                      className={`block text-[14px] font-medium truncate ${
+                        isSelected ? 'text-text-primary' : 'text-text-secondary'
+                      }`}
+                    >
+                      {t(labelKey)}
+                    </span>
+                    {noteText && <span className="block text-[12px] text-text-muted">{noteText}</span>}
                   </span>
 
-                  <span className="w-24 text-right text-[13px] text-text-secondary tabular-nums hidden sm:block">
-                    {t('xfer.itemCount', { count: cat.item_count.toLocaleString() })}
+                  <span className="w-24 text-end text-[13px] text-text-secondary tabular-nums hidden sm:block">
+                    {readable ? t('xfer.itemCount', { count: cat.item_count }) : '—'}
                   </span>
 
-                  <span className="w-20 text-right text-[13px] font-medium text-text-primary tabular-nums">
-                    {formatBytes(cat.total_bytes)}
+                  <span className="w-20 text-end text-[13px] font-medium text-text-primary tabular-nums">
+                    {readable ? formatBytes(cat.total_bytes) : '—'}
                   </span>
                 </button>
               );
@@ -719,7 +741,7 @@ export default function DataTransfer() {
 
             <button
               type="button"
-              disabled={selectedCategories.length === 0 || startTransferMutation.isPending}
+              disabled={activeCategories.length === 0 || startTransferMutation.isPending}
               onClick={() => startTransferMutation.mutate()}
               className="btn-primary px-6 py-3 text-[15px]"
             >

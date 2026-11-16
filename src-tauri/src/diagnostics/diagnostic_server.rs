@@ -101,16 +101,30 @@ impl DiagnosticServerManager {
         let local_ip = get_local_ip().unwrap_or_else(|| "127.0.0.1".to_string());
         let pin = format!("{:04}", (rand_u32() % 9000) + 1000);
 
-        let listener = tokio::net::TcpListener::bind("0.0.0.0:0")
-            .await
+        // A fixed port keeps the address the same between runs, so the phone's
+        // browser remembers the certificate it already accepted.
+        let listener = std::net::TcpListener::bind(("0.0.0.0", COMPANION_PORT))
+            .or_else(|_| std::net::TcpListener::bind("0.0.0.0:0"))
             .map_err(|e| format!("Failed to bind diagnostic server: {}", e))?;
+        listener
+            .set_nonblocking(true)
+            .map_err(|e| format!("Failed to configure diagnostic server: {}", e))?;
 
         let port = listener
             .local_addr()
             .map_err(|e| format!("Failed to get local addr: {}", e))?
             .port();
 
-        let connect_url = format!("http://{}:{}/?pin={}", local_ip, port, pin);
+        let cert_dir = app_handle.as_ref().and_then(|a| {
+            use tauri::Manager;
+            a.path().app_data_dir().ok().map(|d| d.join("companion-tls"))
+        });
+        let (cert_pem, key_pem) = load_or_create_certificate(cert_dir.as_deref(), &local_ip)?;
+        let tls = axum_server::tls_rustls::RustlsConfig::from_pem(cert_pem, key_pem)
+            .await
+            .map_err(|e| format!("Failed to load the phone page certificate: {}", e))?;
+
+        let connect_url = format!("https://{}:{}/?pin={}", local_ip, port, pin);
 
         let (qr_code_svg, qr_code_data_url) = generate_qr(&connect_url)?;
 
@@ -139,13 +153,15 @@ impl DiagnosticServerManager {
 
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
+        let server_handle = axum_server::Handle::new();
+        let stopper = server_handle.clone();
         tokio::spawn(async move {
-            axum::serve(listener, app)
-                .with_graceful_shutdown(async move {
-                    let _ = shutdown_rx.await;
-                })
-                .await
-                .ok();
+            let _ = shutdown_rx.await;
+            stopper.graceful_shutdown(Some(std::time::Duration::from_secs(1)));
+        });
+        let server = axum_server::from_tcp_rustls(listener, tls).handle(server_handle);
+        tokio::spawn(async move {
+            server.serve(app.into_make_service()).await.ok();
         });
 
         // Forward mobile sync events to the Tauri frontend. Spawned exactly
@@ -345,6 +361,13 @@ fn render_mobile_diagnostic_html(pin: &str) -> String {
     /* Video Viewfinder */
     video {{ width: 100%; border-radius: 12px; background: #000; height: 220px; object-fit: cover; display: none; margin-top: 10px; border: 1px solid #334155; }}
     .live-indicator {{ display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #38bdf8; font-weight: 700; }}
+
+    /* Technician confirmation sheet and notices */
+    #askSheet {{ display: none; position: fixed; inset: 0; z-index: 10000; background: rgba(0,0,0,0.55); align-items: flex-end; }}
+    #askSheet .sheet {{ width: 100%; background: #0f172a; border-top: 1px solid #334155; border-radius: 20px 20px 0 0; padding: 20px 16px calc(20px + env(safe-area-inset-bottom)); }}
+    #askText {{ font-size: 16px; font-weight: 700; margin-bottom: 16px; line-height: 1.35; }}
+    #askSheet .row {{ display: flex; gap: 10px; }}
+    #note {{ display: none; margin: 0 16px 14px; padding: 12px 14px; border-radius: 12px; background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.35); color: #fcd34d; font-size: 12px; line-height: 1.45; }}
   </style>
 </head>
 <body>
@@ -367,6 +390,8 @@ fn render_mobile_diagnostic_html(pin: &str) -> String {
     </div>
     <span style="font-size: 18px;">⚡</span>
   </div>
+
+  <div id="note" role="status"></div>
 
   <div class="container">
     <!-- 1. Touchscreen Matrix -->
@@ -482,11 +507,61 @@ fn render_mobile_diagnostic_html(pin: &str) -> String {
     <div id="rgbwText">RED PANEL (Tap for Green)</div>
   </div>
 
+  <!-- Technician confirmation: only a person can say a sound was heard or a picture was clear -->
+  <div id="askSheet">
+    <div class="sheet">
+      <p id="askText"></p>
+      <div class="row">
+        <button class="btn btn-danger" id="askNo">No</button>
+        <button class="btn btn-success" id="askYes">Yes</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const PIN = '{pin}';
     let ws = null;
     let audioCtx = null;
     let isUnlocked = false;
+
+    // Shows a message on the phone. Used when a test can't run here, in which
+    // case nothing is sent: the test stays "not tested" on the desktop.
+    function note(text) {{
+      const el = document.getElementById('note');
+      el.innerText = text;
+      el.style.display = 'block';
+      el.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+    }}
+
+    // Asks the technician to confirm what they saw or heard, then reports it.
+    function ask(question, testKey, passDetails, failDetails, after) {{
+      const sheet = document.getElementById('askSheet');
+      document.getElementById('askText').innerText = question;
+      sheet.style.display = 'flex';
+      const done = (passed) => {{
+        sheet.style.display = 'none';
+        syncResult(testKey, passed, passed ? passDetails : failDetails);
+        if (after) after(passed);
+      }};
+      document.getElementById('askYes').onclick = () => done(true);
+      document.getElementById('askNo').onclick = () => done(false);
+    }}
+
+    // Camera and microphone only work on a secure (https) page.
+    function mediaAvailable() {{
+      if (window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) return true;
+      note('This browser blocks the camera and microphone on this page. Open the https:// link from the QR code (accept the certificate warning), or test these by hand on the desktop.');
+      return false;
+    }}
+
+    // A refused permission says nothing about the hardware, so it is not a failure.
+    function mediaError(err, testKey, label) {{
+      if (err && (err.name === 'NotAllowedError' || err.name === 'SecurityError')) {{
+        note(label + ': permission was refused. Allow access in the browser and try again.');
+        return;
+      }}
+      syncResult(testKey, false, label + ' could not start: ' + (err && err.message ? err.message : err));
+    }}
 
     function unlockMobileAudio() {{
       try {{
@@ -601,17 +676,23 @@ fn render_mobile_diagnostic_html(pin: &str) -> String {
         }}
         setTimeout(() => {{
           osc.stop();
-          if (btn) btn.innerText = 'Passed';
-          syncResult(testKey, true, 'Tone played on phone at ' + freq + 'Hz with 0 distortion');
+          if (btn) {{ btn.innerText = 'Play'; btn.classList.remove('btn-success'); }}
+          const where = testKey === 'earpiece_speaker' ? 'the top earpiece (hold it to your ear)' : 'the bottom speaker';
+          ask('Did you hear the ' + freq + ' Hz tone clearly from ' + where + '?', testKey,
+            'Technician heard the ' + freq + ' Hz tone clearly',
+            'Technician did not hear the ' + freq + ' Hz tone clearly',
+            (ok) => {{ if (btn) {{ btn.innerText = ok ? 'Passed' : 'Failed'; btn.classList.add(ok ? 'btn-success' : 'btn-danger'); }} }});
         }}, 1800);
       }} catch (e) {{
         if (btn) btn.innerText = 'Err';
+        note('The tone could not play: ' + e.message);
       }}
     }}
 
     // --- Microphone Loopback ---
     function testMicrophone(btn) {{
       unlockMobileAudio();
+      if (!mediaAvailable()) return;
       navigator.mediaDevices.getUserMedia({{ audio: true }}).then(stream => {{
         if (btn) {{
           btn.innerText = 'Recording 3s...';
@@ -638,16 +719,17 @@ fn render_mobile_diagnostic_html(pin: &str) -> String {
           const url = URL.createObjectURL(blob);
           const audio = new Audio(url);
           if (btn) btn.innerText = 'Playing back...';
-          audio.play().then(() => {{
-            setTimeout(() => {{
-              if (btn) btn.innerText = 'Passed';
-              syncResult('main_microphone', true, 'Phone mic recorded and looped back through speaker clearly (' + finalMime + ')');
-              syncResult('noise_mic', true, 'Secondary phone mic verified');
-            }}, 2500);
-          }}).catch((err) => {{
-            console.warn('Audio playback error:', err);
-            if (btn) btn.innerText = 'Passed';
-            syncResult('main_microphone', true, 'Phone mic input level recorded');
+          const finish = (ok) => {{
+            if (btn) {{ btn.classList.remove('btn-success'); btn.innerText = ok ? 'Passed' : 'Failed'; btn.classList.add(ok ? 'btn-success' : 'btn-danger'); }}
+          }};
+          // Only the main microphone is checked here; the noise-cancelling
+          // microphone can't be selected from a web page and stays untested.
+          audio.onended = () => ask('Did you hear your recording played back clearly?', 'main_microphone',
+            'Technician heard the 3-second recording played back clearly',
+            'Recording was missing or distorted on playback', finish);
+          audio.play().catch((err) => {{
+            if (btn) btn.innerText = 'Record';
+            note('The recording could not be played back: ' + err.message);
           }});
         }};
         recorder.start();
@@ -655,46 +737,30 @@ fn render_mobile_diagnostic_html(pin: &str) -> String {
           if (recorder.state === 'recording') recorder.stop();
         }}, 3000);
       }}).catch(err => {{
-        if (btn) btn.innerText = 'Failed';
-        syncResult('main_microphone', false, 'Phone microphone error: ' + err.message);
+        if (btn) btn.innerText = 'Record';
+        mediaError(err, 'main_microphone', 'Microphone');
       }});
     }}
 
     // --- Haptics & Vibration ---
     function testHaptics(btn) {{
       unlockMobileAudio();
-      let didVibrate = false;
-      if (navigator.vibrate) {{
-        navigator.vibrate([100, 60, 100, 60, 250]);
-        didVibrate = true;
+      // iPhone browsers have no vibration API, so this can't be tested here.
+      if (!navigator.vibrate) {{
+        note("This phone's browser can't make the phone vibrate (iPhone Safari never can). Test the vibration motor by hand on the desktop.");
+        return;
       }}
-      // For iOS Safari, synthesize 85Hz resonant acoustic thud pulse through loudspeaker
-      try {{
-        if (audioCtx) {{
-          const osc = audioCtx.createOscillator();
-          const gain = audioCtx.createGain();
-          osc.type = 'sawtooth';
-          osc.frequency.setValueAtTime(85, audioCtx.currentTime);
-          gain.gain.setValueAtTime(0.8, audioCtx.currentTime);
-          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4);
-          osc.connect(gain);
-          gain.connect(audioCtx.destination);
-          osc.start();
-          osc.stop(audioCtx.currentTime + 0.4);
-        }}
-      }} catch (e) {{
-        console.error(e);
-      }}
-      if (btn) {{
-        btn.classList.add('btn-success');
-        btn.innerText = 'Vibrated';
-      }}
-      syncResult('force_touch', true, didVibrate ? 'Phone Taptic Engine vibration pulse executed on device' : 'Phone haptic actuator impulse felt');
+      navigator.vibrate([100, 60, 100, 60, 250]);
+      ask('Did the phone vibrate?', 'vibration_motor',
+        'Technician felt the vibration pulse',
+        'No vibration felt',
+        (ok) => {{ if (btn) {{ btn.innerText = ok ? 'Passed' : 'Failed'; btn.classList.add(ok ? 'btn-success' : 'btn-danger'); }} }});
     }}
 
     // --- Cameras ---
     let currentStream = null;
     function startCamera(facingMode, testKey) {{
+      if (!mediaAvailable()) return;
       const video = document.getElementById('cameraPreview');
       if (currentStream) {{
         currentStream.getTracks().forEach(t => t.stop());
@@ -706,35 +772,41 @@ fn render_mobile_diagnostic_html(pin: &str) -> String {
           height: {{ ideal: 720 }}
         }}
       }};
+      const label = facingMode === 'user' ? 'Front camera' : 'Rear camera';
       navigator.mediaDevices.getUserMedia(constraints).then(stream => {{
         currentStream = stream;
         video.srcObject = stream;
         video.style.display = 'block';
         video.play().catch(e => console.warn(e));
-        syncResult(testKey, true, 'Phone ' + facingMode + ' camera stream captured cleanly');
-      }}).catch(err => {{
-        alert('Camera access note: ' + err.message);
-        syncResult(testKey, false, err.message);
-      }});
+        // Give the technician a moment to look at the live picture first.
+        setTimeout(() => ask('Is the ' + label.toLowerCase() + ' picture clear, in focus and free of spots or lines?', testKey,
+          label + ': technician confirmed a clear, focused picture',
+          label + ': picture blurry, dark or marked'), 2500);
+      }}).catch(err => mediaError(err, testKey, label));
     }}
 
+    // The torch is a camera setting. Safari does not offer it, so on iPhone the
+    // flash has to be checked by hand.
     function toggleTorch(btn) {{
-      if (currentStream) {{
-        const track = currentStream.getVideoTracks()[0];
-        if (track && track.applyConstraints) {{
-          track.applyConstraints({{ advanced: [{{ torch: true }}] }}).then(() => {{
-            if (btn) {{
-              btn.classList.add('btn-success');
-              btn.innerText = 'Active';
-            }}
-            syncResult('camera_flash_torch', true, 'Phone LED flash torch constraint activated');
-          }}).catch(() => {{
-            syncResult('camera_flash_torch', true, 'Phone flash signal sent');
-          }});
-          return;
-        }}
+      const track = currentStream && currentStream.getVideoTracks()[0];
+      if (!track) {{
+        remoteToggleTorch();
+        return;
       }}
-      syncResult('camera_flash_torch', true, 'Phone torch tested');
+      const caps = track.getCapabilities ? track.getCapabilities() : {{}};
+      if (!caps.torch) {{
+        note("This phone's browser can't switch the flash on (iPhone Safari never can). Test the flash by hand on the desktop.");
+        return;
+      }}
+      track.applyConstraints({{ advanced: [{{ torch: true }}] }}).then(() => {{
+        ask('Did the rear flash light up?', 'camera_flash_torch',
+          'Technician saw the rear flash light up',
+          'Rear flash did not light up',
+          (ok) => {{
+            track.applyConstraints({{ advanced: [{{ torch: false }}] }}).catch(() => {{}});
+            if (btn) {{ btn.innerText = ok ? 'Passed' : 'Failed'; btn.classList.add(ok ? 'btn-success' : 'btn-danger'); }}
+          }});
+      }}).catch(err => note('The flash could not be switched on: ' + err.message));
     }}
 
     // Torch triggered remotely from the desktop studio — opens the rear camera
@@ -744,6 +816,7 @@ fn render_mobile_diagnostic_html(pin: &str) -> String {
         toggleTorch(null);
         return;
       }}
+      if (!mediaAvailable()) return;
       navigator.mediaDevices.getUserMedia({{ video: {{ facingMode: {{ ideal: 'environment' }} }} }}).then(stream => {{
         currentStream = stream;
         const video = document.getElementById('cameraPreview');
@@ -752,9 +825,7 @@ fn render_mobile_diagnostic_html(pin: &str) -> String {
           video.style.display = 'block';
         }}
         toggleTorch(null);
-      }}).catch(err => {{
-        syncResult('camera_flash_torch', false, 'Phone torch unavailable: ' + err.message);
-      }});
+      }}).catch(err => mediaError(err, 'camera_flash_torch', 'Flash'));
     }}
 
     // --- Touch Matrix ---
@@ -830,8 +901,12 @@ fn render_mobile_diagnostic_html(pin: &str) -> String {
     function nextRgbwColor() {{
       rgbwIdx++;
       if (rgbwIdx >= colors.length) {{
-        document.getElementById('rgbwOverlay').style.display = 'none';
-        syncResult('display_rgbw', true, 'RGBW panel inspection on phone screen passed with zero dead pixels');
+        const overlay = document.getElementById('rgbwOverlay');
+        overlay.style.display = 'none';
+        overlay.style.backgroundColor = '';
+        ask('Were all five colours even, with no dead pixels, lines, stains or burn-in?', 'display_rgbw',
+          'Technician checked red, green, blue, white and black panels: no dead pixels or marks',
+          'Technician saw dead pixels, lines, stains or burn-in on the colour panels');
       }} else {{
         setRgbwStep();
       }}
@@ -860,6 +935,75 @@ fn generate_qr(data: &str) -> Result<(String, String), String> {
     Ok((svg_xml, data_url))
 }
 
+/// Preferred port for the phone test page (falls back to any free port).
+const COMPANION_PORT: u16 = 47823;
+
+/// Returns a PEM certificate and key for the phone test page at `ip`.
+///
+/// The certificate is self-signed, so the phone shows a one-time warning. It is
+/// saved in `dir` and reused while the computer keeps the same address, so the
+/// warning does not come back on every start. iPhones reject server
+/// certificates without an IP/host name entry, without the server-auth usage,
+/// or valid for too long, so all three are set.
+fn load_or_create_certificate(dir: Option<&std::path::Path>, ip: &str) -> Result<(Vec<u8>, Vec<u8>), String> {
+    if let Some(dir) = dir {
+        let read = |name: &str| std::fs::read(dir.join(name)).ok();
+        if let (Some(cert), Some(key), Some(saved_ip), Some(expires)) =
+            (read("cert.pem"), read("key.pem"), read("ip.txt"), read("expires.txt"))
+        {
+            let expires: u64 = String::from_utf8_lossy(&expires).trim().parse().unwrap_or(0);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(u64::MAX);
+            // Renew a week before expiry.
+            if saved_ip == ip.as_bytes() && now + 7 * 86_400 < expires {
+                return Ok((cert, key));
+            }
+        }
+    }
+
+    let (cert, key, expires) = create_certificate(ip)?;
+    if let Some(dir) = dir {
+        // Best effort: without saving, the phone just warns again next time.
+        if std::fs::create_dir_all(dir).is_ok() {
+            let _ = std::fs::write(dir.join("cert.pem"), &cert);
+            let _ = std::fs::write(dir.join("key.pem"), &key);
+            let _ = std::fs::write(dir.join("ip.txt"), ip);
+            let _ = std::fs::write(dir.join("expires.txt"), expires.to_string());
+        }
+    }
+    Ok((cert, key))
+}
+
+fn create_certificate(ip: &str) -> Result<(Vec<u8>, Vec<u8>, u64), String> {
+    use rcgen::{CertificateParams, DnType, ExtendedKeyUsagePurpose, KeyPair};
+    // One process-wide TLS backend; a second install attempt is harmless.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
+    let mut params = CertificateParams::new(vec![ip.to_string(), "localhost".to_string()])
+        .map_err(|e| format!("Certificate error: {}", e))?;
+    params.distinguished_name.push(DnType::CommonName, "HouShop phone test");
+    params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_secs();
+    let lifetime = 300 * 86_400; // under Apple's 398-day limit
+    params.not_before = time_from_unix(now.saturating_sub(86_400))?;
+    params.not_after = time_from_unix(now + lifetime)?;
+
+    let key = KeyPair::generate().map_err(|e| format!("Certificate key error: {}", e))?;
+    let cert = params
+        .self_signed(&key)
+        .map_err(|e| format!("Certificate error: {}", e))?;
+    Ok((cert.pem().into_bytes(), key.serialize_pem().into_bytes(), now + lifetime))
+}
+
+fn time_from_unix(secs: u64) -> Result<time::OffsetDateTime, String> {
+    time::OffsetDateTime::from_unix_timestamp(secs as i64).map_err(|e| e.to_string())
+}
+
 fn get_local_ip() -> Option<String> {
     let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
     socket.connect("8.8.8.8:80").ok()?;
@@ -874,4 +1018,108 @@ fn rand_u32() -> u32 {
         .unwrap_or_default()
         .subsec_nanos();
     nanos
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn curl(args: &[&str]) -> (u16, String) {
+        let out = std::process::Command::new("curl")
+            .args(["-sk", "--max-time", "10", "-w", "\n%{http_code}"])
+            .args(args)
+            .output()
+            .expect("curl");
+        let text = String::from_utf8_lossy(&out.stdout).to_string();
+        let (body, code) = text.rsplit_once('\n').unwrap_or(("", "0"));
+        (code.trim().parse().unwrap_or(0), body.to_string())
+    }
+
+    #[test]
+    fn certificate_is_one_an_iphone_accepts() {
+        let (cert, key, expires) = create_certificate("192.168.1.20").unwrap();
+        assert!(String::from_utf8_lossy(&cert).contains("BEGIN CERTIFICATE"));
+        assert!(String::from_utf8_lossy(&key).contains("PRIVATE KEY"));
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert!(expires > now && expires - now < 398 * 86_400, "Apple caps certificates at 398 days");
+
+        // Inspect with openssl when present: IP entry and server-auth usage.
+        let dir = std::env::temp_dir().join(format!("houshop-cert-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let pem = dir.join("c.pem");
+        std::fs::write(&pem, &cert).unwrap();
+        if let Ok(out) = std::process::Command::new("openssl")
+            .args(["x509", "-noout", "-text", "-in"])
+            .arg(&pem)
+            .output()
+        {
+            let text = String::from_utf8_lossy(&out.stdout);
+            if out.status.success() {
+                assert!(text.contains("IP Address:192.168.1.20"), "{text}");
+                assert!(text.contains("TLS Web Server Authentication"), "{text}");
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn certificate_is_reused_until_the_address_changes() {
+        let dir = std::env::temp_dir().join(format!("houshop-reuse-{}", std::process::id()));
+        let first = load_or_create_certificate(Some(&dir), "10.0.0.5").unwrap();
+        let again = load_or_create_certificate(Some(&dir), "10.0.0.5").unwrap();
+        assert_eq!(first, again, "same address must keep the accepted certificate");
+        let moved = load_or_create_certificate(Some(&dir), "10.0.0.9").unwrap();
+        assert_ne!(first.0, moved.0, "a new address needs a new certificate");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn phone_page_is_served_over_https_and_results_reach_the_desktop() {
+        let mut manager = DiagnosticServerManager::new();
+        let mut results = manager.sync_tx.subscribe();
+        let info = manager.start(None).await.unwrap();
+        assert!(info.connect_url.starts_with("https://"), "{}", info.connect_url);
+        let base = format!("https://127.0.0.1:{}", info.port);
+
+        let (code, page) = tokio::task::spawn_blocking({
+            let url = format!("{}/?pin={}", base, info.pin);
+            move || curl(&[&url])
+        })
+        .await
+        .unwrap();
+        assert_eq!(code, 200);
+        assert!(page.contains("function ask("), "page must ask the technician to confirm");
+        assert!(!page.contains("0 distortion"), "no invented results");
+
+        let (code, _) = tokio::task::spawn_blocking({
+            let url = format!("{}/?pin=0000", base);
+            move || curl(&[&url])
+        })
+        .await
+        .unwrap();
+        assert_eq!(code, 401, "wrong PIN must be refused");
+
+        let body = format!(
+            r#"{{"pin":"{}","test_key":"bottom_loudspeaker","passed":false,"details":"not heard"}}"#,
+            info.pin
+        );
+        let (code, _) = tokio::task::spawn_blocking({
+            let url = format!("{}/api/sync", base);
+            move || curl(&["-X", "POST", "-H", "Content-Type: application/json", "-d", &body, &url])
+        })
+        .await
+        .unwrap();
+        assert_eq!(code, 200);
+        let got = tokio::time::timeout(std::time::Duration::from_secs(5), results.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(got.test_key, "bottom_loudspeaker");
+        assert!(!got.passed);
+
+        manager.stop();
+    }
 }

@@ -27,8 +27,7 @@ impl AndroidProbe {
         let props = self.get_all_props(serial).await?;
 
         // 2. Query battery via dumpsys & sysfs
-        let (battery_health_pct, cycles, design_mah, actual_mah, temp_c, current_charge, is_charging) =
-            self.query_battery(serial).await;
+        let reading = self.query_battery(serial).await;
 
         // 3. Query storage & RAM
         let (ram_gb, storage_total, storage_free) = self.query_memory_and_storage(serial).await;
@@ -60,20 +59,19 @@ impl AndroidProbe {
             .unwrap_or_else(|| "arm64-v8a".into());
 
         let battery = BatteryGasGauge {
-            health_percentage: battery_health_pct,
-            cycle_count: cycles,
-            design_capacity_mah: design_mah,
-            actual_capacity_mah: actual_mah,
-            temperature_celsius: temp_c,
+            health_percentage: reading.health_percentage,
+            cycle_count: reading.cycle_count,
+            design_capacity_mah: reading.design_mah,
+            actual_capacity_mah: reading.actual_mah,
+            temperature_celsius: reading.temperature_celsius,
             serial_number: props.get("ro.serialno").cloned(),
-            manufacturer: Some(format!("{} OEM Cell", brand)),
-            status: if battery_health_pct >= 80 {
-                ComponentStatus::Original
-            } else {
-                ComponentStatus::ReplacedOem
-            },
-            current_charge_percentage: current_charge,
-            is_charging,
+            // The phone does not say who made the cell, and nothing here checks that
+            // the battery is genuine, so neither is claimed.
+            manufacturer: None,
+            status: ComponentStatus::Unknown,
+            current_charge_percentage: reading.charge_percentage,
+            is_charging: reading.is_charging,
+            estimated: reading.estimated,
         };
 
         let parts_audit = audit_android_parts(&props);
@@ -124,34 +122,17 @@ impl AndroidProbe {
         Ok(props)
     }
 
-    async fn query_battery(&self, serial: &str) -> (u8, u32, u32, u32, f32, Option<u8>, Option<bool>) {
+    async fn query_battery(&self, serial: &str) -> AndroidBattery {
         let dumpsys = self
             .exec_adb(serial, &["shell", "dumpsys", "battery"])
             .await
             .unwrap_or_default();
+        let (charge_percentage, temperature_celsius, is_charging) = parse_dumpsys_battery(&dumpsys);
 
-        let mut level: u8 = 88;
-        let mut temp_c: f32 = 28.0;
-        let mut is_charging = false;
-
-        for line in dumpsys.lines() {
-            let line = line.trim();
-            if let Some(rest) = line.strip_prefix("level:") {
-                if let Ok(l) = rest.trim().parse::<u8>() {
-                    level = l;
-                }
-            } else if let Some(rest) = line.strip_prefix("temperature:") {
-                if let Ok(t) = rest.trim().parse::<f32>() {
-                    temp_c = t / 10.0;
-                }
-            } else if line.contains("USB powered: true") || line.contains("AC powered: true") || line.contains("status: 2") {
-                is_charging = true;
-            }
-        }
-
-        // Try reading cycle count from sysfs
-        let cycles_out = self
-            .exec_adb(
+        let read_u32 = |out: String| out.trim().parse::<u32>().ok();
+        // Cycle count from sysfs; many phones don't expose it.
+        let cycle_count = read_u32(
+            self.exec_adb(
                 serial,
                 &[
                     "shell",
@@ -159,53 +140,51 @@ impl AndroidProbe {
                 ],
             )
             .await
-            .unwrap_or_default();
-
-        let cycles = cycles_out.trim().parse::<u32>().unwrap_or(185);
-
-        // Try reading full charge design / actual
-        let design_out = self
-            .exec_adb(
+            .unwrap_or_default(),
+        );
+        let design = read_u32(
+            self.exec_adb(
                 serial,
-                &[
-                    "shell",
-                    "cat /sys/class/power_supply/battery/charge_full_design 2>/dev/null",
-                ],
+                &["shell", "cat /sys/class/power_supply/battery/charge_full_design 2>/dev/null"],
             )
             .await
-            .unwrap_or_default();
-
-        let actual_out = self
-            .exec_adb(
+            .unwrap_or_default(),
+        )
+        .map(microamp_to_mah);
+        let actual = read_u32(
+            self.exec_adb(
                 serial,
-                &[
-                    "shell",
-                    "cat /sys/class/power_supply/battery/charge_full 2>/dev/null",
-                ],
+                &["shell", "cat /sys/class/power_supply/battery/charge_full 2>/dev/null"],
             )
             .await
-            .unwrap_or_default();
+            .unwrap_or_default(),
+        )
+        .map(microamp_to_mah);
 
-        let design_mah = design_out
-            .trim()
-            .parse::<u32>()
-            .map(|v| if v > 100_000 { v / 1000 } else { v })
-            .unwrap_or(5000);
-
-        let actual_mah = actual_out
-            .trim()
-            .parse::<u32>()
-            .map(|v| if v > 100_000 { v / 1000 } else { v })
-            .unwrap_or_else(|_| (design_mah as f32 * 0.93) as u32);
-
-        let health_pct = if design_mah > 0 {
-            let pct = ((actual_mah as f32 / design_mah as f32) * 100.0).round() as u8;
-            pct.min(100)
-        } else {
-            level
-        };
-
-        (health_pct, cycles, design_mah, actual_mah, temp_c, Some(level), Some(is_charging))
+        match (design, actual) {
+            (Some(d), Some(a)) if d > 0 => AndroidBattery {
+                health_percentage: ((a as f32 / d as f32) * 100.0).round().min(100.0) as u8,
+                cycle_count: cycle_count.unwrap_or(0),
+                design_mah: d,
+                actual_mah: a,
+                temperature_celsius,
+                charge_percentage,
+                is_charging,
+                estimated: false,
+            },
+            // Capacity couldn't be read: no invented figures. Health is left neutral
+            // and the report is flagged so the page says it wasn't measured.
+            _ => AndroidBattery {
+                health_percentage: 100,
+                cycle_count: cycle_count.unwrap_or(0),
+                design_mah: design.unwrap_or(0),
+                actual_mah: 0,
+                temperature_celsius,
+                charge_percentage,
+                is_charging,
+                estimated: true,
+            },
+        }
     }
 
     async fn query_memory_and_storage(&self, serial: &str) -> (f32, u64, u64) {
@@ -344,7 +323,13 @@ impl AndroidProbe {
         let output = cmd
             .output()
             .await
-            .map_err(|e| format!("Failed to run adb command: {}", e))?;
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    "Android tools (adb) are not installed on this computer, so the phone cannot be read. Install Android platform-tools, then reconnect the phone with USB debugging on.".to_string()
+                } else {
+                    format!("Failed to run adb command: {}", e)
+                }
+            })?;
 
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -353,6 +338,44 @@ impl AndroidProbe {
             Err(stderr.to_string())
         }
     }
+}
+
+struct AndroidBattery {
+    health_percentage: u8,
+    cycle_count: u32,
+    design_mah: u32,
+    actual_mah: u32,
+    temperature_celsius: Option<f32>,
+    charge_percentage: Option<u8>,
+    is_charging: Option<bool>,
+    estimated: bool,
+}
+
+/// Android reports these in µAh on most devices, mAh on a few.
+fn microamp_to_mah(v: u32) -> u32 {
+    if v > 100_000 { v / 1000 } else { v }
+}
+
+/// `(level %, temperature °C, charging)` from `dumpsys battery`; each is `None`
+/// when the output doesn't contain it.
+fn parse_dumpsys_battery(text: &str) -> (Option<u8>, Option<f32>, Option<bool>) {
+    let (mut level, mut temp, mut charging) = (None, None, None);
+    let mut saw_any = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(rest) = line.strip_prefix("level:") {
+            level = rest.trim().parse::<u8>().ok();
+            saw_any = true;
+        } else if let Some(rest) = line.strip_prefix("temperature:") {
+            temp = rest.trim().parse::<f32>().ok().map(|t| t / 10.0);
+        } else if line.contains("USB powered: true") || line.contains("AC powered: true") || line.contains("status: 2") {
+            charging = Some(true);
+        }
+    }
+    if saw_any && charging.is_none() {
+        charging = Some(false);
+    }
+    (level, temp, charging)
 }
 
 fn resolve_adb_tool() -> Option<PathBuf> {
@@ -396,4 +419,38 @@ fn is_file_executable(path: &PathBuf) -> bool {
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// With no adb on the machine the probe must say so in plain words,
+    /// not return an "os error 2" or an empty report.
+    #[tokio::test]
+    async fn missing_adb_gives_a_plain_message() {
+        let probe = AndroidProbe {
+            adb_path: PathBuf::from("/nonexistent/path/to/adb"),
+        };
+        let err = probe.probe_device("ABC123").await.unwrap_err();
+        assert!(err.contains("not installed"), "{err}");
+        assert!(!err.contains("os error"), "{err}");
+    }
+
+    #[test]
+    fn dumpsys_readings_are_parsed() {
+        let text = "Current Battery Service state:\n  AC powered: false\n  USB powered: true\n  status: 2\n  level: 76\n  temperature: 312\n";
+        assert_eq!(parse_dumpsys_battery(text), (Some(76), Some(31.2), Some(true)));
+    }
+
+    #[test]
+    fn empty_dumpsys_means_unknown_not_88_percent() {
+        assert_eq!(parse_dumpsys_battery(""), (None, None, None));
+    }
+
+    #[test]
+    fn capacity_units_are_normalised() {
+        assert_eq!(microamp_to_mah(5_000_000), 5000);
+        assert_eq!(microamp_to_mah(4850), 4850);
+    }
 }

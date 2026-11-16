@@ -52,7 +52,8 @@ pub struct BatteryGasGauge {
     pub cycle_count: u32,
     pub design_capacity_mah: u32,
     pub actual_capacity_mah: u32,
-    pub temperature_celsius: f32,
+    /// None when the device does not expose a battery temperature.
+    pub temperature_celsius: Option<f32>,
     pub serial_number: Option<String>,
     pub manufacturer: Option<String>,
     pub status: ComponentStatus,
@@ -60,6 +61,10 @@ pub struct BatteryGasGauge {
     pub current_charge_percentage: Option<u8>,
     #[serde(default)]
     pub is_charging: Option<bool>,
+    /// True when health/capacity could not be read from the battery itself and
+    /// were estimated from the cycle count instead.
+    #[serde(default)]
+    pub estimated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -144,6 +149,14 @@ pub struct GradingResult {
     pub valuation_multiplier: f32, // Recommended trade-in adjustment (e.g. 1.0 for A+, 0.9 for A, 0.75 for B, 0.55 for C, 0.25 for Defective)
     pub summary: String,
     pub defects: Vec<String>,
+    /// Hardware tests that have not been run yet. They do not lower the score,
+    /// but the grade stays provisional until they are done.
+    #[serde(default)]
+    pub pending_tests: usize,
+    /// True while any hardware test is still pending: the grade is an estimate
+    /// from what the probe could read, and is capped below A.
+    #[serde(default)]
+    pub provisional: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

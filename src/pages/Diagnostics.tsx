@@ -1,3 +1,4 @@
+import PhoneToolsNotice from '../components/PhoneToolsNotice';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -33,6 +34,8 @@ import {
   Unlock,
   Sliders,
   Sparkles,
+  Info,
+  Circle,
   Zap,
 } from 'lucide-react';
 import { ManualTestingStudio } from '../components/ManualTestingStudio';
@@ -429,6 +432,20 @@ export default function Diagnostics() {
   };
 
   // Filter hardware tests by category
+  // How many of the hardware tests have actually been run. A test nobody has
+  // run is "not tested", never "failed".
+  const testedCount = useMemo(
+    () => (report ? Object.values(report.hardware_tests).filter((x) => x.tested).length : 0),
+    [report],
+  );
+  // Capacity couldn't be read at all: show it as unknown, not as 0 mAh / 100%.
+  const batteryUnmeasured = !!report && !!report.battery.estimated && report.battery.actual_capacity_mah === 0;
+  const testsSummary = report
+    ? testedCount === 0
+      ? t('diag.notTestedYet')
+      : t('diag.testsProgress', { tested: testedCount, total: report.grading.total_count, passed: report.grading.passed_count })
+    : '';
+
   const filteredTests = useMemo(() => {
     if (!report) return [];
     const tests = Object.values(report.hardware_tests);
@@ -639,6 +656,8 @@ export default function Diagnostics() {
           </span>
         </div>
       ) : (
+        <>
+        <PhoneToolsNotice />
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-4 py-3 bg-accent-orange/10 border border-accent-orange/30 rounded-2xl text-[13px] text-text-secondary">
           <div className="flex items-center gap-2">
             <AlertTriangle size={15} className="text-accent-orange flex-shrink-0" />
@@ -654,6 +673,7 @@ export default function Diagnostics() {
             {t('diag.usb.scan')}
           </button>
         </div>
+        </>
       )}
 
       {report ? (
@@ -674,14 +694,18 @@ export default function Diagnostics() {
                   
                   {/* Live Battery Charge & Health Badges */}
                   <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[13px] font-bold bg-accent-green/15 text-accent-green border border-accent-green/30">
-                      <Zap size={11} className={report.battery.is_charging ? 'animate-pulse' : ''} />
-                      {t('diag.battery.chargeBadge', { percent: report.battery.current_charge_percentage ?? 54, state: report.battery.is_charging ? t('diag.battery.charging') : '' })}
-                    </span>
-                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[13px] font-bold bg-accent-blue/15 text-accent-blue border border-accent-blue/30">
-                      <BatteryCharging size={11} />
-                      {t('diag.battery.healthBadge', { percent: report.battery.health_percentage })}
-                    </span>
+                    {report.battery.current_charge_percentage != null && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[13px] font-bold bg-accent-green/15 text-accent-green border border-accent-green/30">
+                        <Zap size={11} className={report.battery.is_charging ? 'animate-pulse' : ''} />
+                        {t('diag.battery.chargeBadge', { percent: report.battery.current_charge_percentage, state: report.battery.is_charging ? t('diag.battery.charging') : '' })}
+                      </span>
+                    )}
+                    {!batteryUnmeasured && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[13px] font-bold bg-accent-blue/15 text-accent-blue border border-accent-blue/30">
+                        <BatteryCharging size={11} />
+                        {t('diag.battery.healthBadge', { percent: report.battery.health_percentage })}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="w-10 h-10 rounded-xl bg-surface border border-border flex items-center justify-center flex-shrink-0">
@@ -752,9 +776,9 @@ export default function Diagnostics() {
                     <div className="text-[13px] text-text-muted">
                       {t('diag.battery.currentCharge')}{' '}
                       <span className="font-bold text-accent-green">
-                        {report.battery.current_charge_percentage ?? 54}%
+                        {report.battery.current_charge_percentage != null ? `${report.battery.current_charge_percentage}%` : '—'}
                       </span>{' '}
-                      {report.battery.is_charging ? t('diag.battery.usbCharging') : t('diag.battery.discharging')}
+                      {report.battery.is_charging == null ? '' : report.battery.is_charging ? t('diag.battery.usbCharging') : t('diag.battery.discharging')}
                     </div>
                   </div>
                 </div>
@@ -768,9 +792,12 @@ export default function Diagnostics() {
                         : 'bg-accent-red/20 text-accent-red border border-accent-red/30'
                     }`}
                   >
-                    {t('diag.battery.healthBadge', { percent: report.battery.health_percentage })}
+                    {batteryUnmeasured ? '—' : t('diag.battery.healthBadge', { percent: report.battery.health_percentage })}
                   </div>
                   <div className="text-[13px] text-text-muted mt-0.5">{t('diag.battery.peakCapacity')}</div>
+                  {report.battery.estimated && (
+                    <div className="text-[13px] font-semibold text-accent-orange mt-0.5">{t('diag.battery.estimated')}</div>
+                  )}
                 </div>
               </div>
 
@@ -778,12 +805,12 @@ export default function Diagnostics() {
               <div className="space-y-1">
                 <div className="flex justify-between text-[13px] text-text-muted">
                   <span>{t('diag.battery.chargeLevel')}</span>
-                  <span className="font-bold text-text-primary">{report.battery.current_charge_percentage ?? 54}%</span>
+                  <span className="font-bold text-text-primary">{report.battery.current_charge_percentage != null ? `${report.battery.current_charge_percentage}%` : '—'}</span>
                 </div>
                 <div className="h-2.5 w-full bg-surface rounded-full overflow-hidden">
                   <div
                     className="h-full bg-accent-green rounded-full transition-all duration-300"
-                    style={{ width: `${report.battery.current_charge_percentage ?? 54}%` }}
+                    style={{ width: `${report.battery.current_charge_percentage ?? 0}%` }}
                   />
                 </div>
               </div>
@@ -792,31 +819,35 @@ export default function Diagnostics() {
                 <div className="bg-surface/60 p-2.5 rounded-xl border border-border">
                   <div className="text-text-muted">{t('diagnostics.batteryCycles')}</div>
                   <div className="text-base font-bold text-text-primary mt-0.5">{report.battery.cycle_count}</div>
-                  <div className="text-[13px] text-text-muted">{t('diag.battery.appleRated', { count: 1000 })}</div>
+                  {report.brand === 'Apple' && (
+                    <div className="text-[13px] text-text-muted">{t('diag.battery.appleRated', { count: 1000 })}</div>
+                  )}
                 </div>
 
                 <div className="bg-surface/60 p-2.5 rounded-xl border border-border">
                   <div className="text-text-muted">{t('diag.battery.capacityLabel')}</div>
                   <div className="text-sm font-bold text-accent-green mt-0.5">
-                    {report.battery.actual_capacity_mah} / {report.battery.design_capacity_mah}
-                    <span className="text-[13px] text-text-muted ml-1">mAh</span>
+                    {batteryUnmeasured ? '—' : `${report.battery.actual_capacity_mah} / ${report.battery.design_capacity_mah}`}
+                    <span className="text-[13px] text-text-muted ms-1">mAh</span>
                   </div>
-                  <div className="text-[13px] text-accent-red font-semibold">
-                    {t('diag.battery.degraded', { lost: report.battery.design_capacity_mah - report.battery.actual_capacity_mah })}
-                  </div>
+                  {!batteryUnmeasured && (
+                    <div className="text-[13px] text-accent-red font-semibold">
+                      {t('diag.battery.degraded', { lost: report.battery.design_capacity_mah - report.battery.actual_capacity_mah })}
+                    </div>
+                  )}
                 </div>
 
                 <div className="bg-surface/60 p-2.5 rounded-xl border border-border">
                   <div className="text-text-muted">{t('diagnostics.batteryTemp')}</div>
                   <div className="text-sm font-bold text-text-primary mt-0.5">
-                    {report.battery.temperature_celsius.toFixed(1)}°C
+                    {report.battery.temperature_celsius != null ? `${report.battery.temperature_celsius.toFixed(1)}°C` : '—'}
                   </div>
                 </div>
 
                 <div className="bg-surface/60 p-2.5 rounded-xl border border-border">
                   <div className="text-text-muted">{t('diag.battery.cellSupplier')}</div>
                   <div className="text-[13px] font-semibold text-text-primary mt-0.5 truncate">
-                    {report.battery.manufacturer || t('diag.oemStandard')}
+                    {report.battery.manufacturer || t('diag.battery.notReported')}
                   </div>
                 </div>
               </div>
@@ -1000,7 +1031,12 @@ export default function Diagnostics() {
                         </span>
                       </div>
                       <div className="min-w-0">
-                        <div className="eyebrow">{t('diagnostics.grade')}</div>
+                        <div className="flex items-center gap-2">
+                          <span className="eyebrow">{t('diagnostics.grade')}</span>
+                          {report.grading.provisional && (
+                            <span className="badge bg-accent-blue/10 text-accent-blue">{t('diag.provisional')}</span>
+                          )}
+                        </div>
                         <div className="mt-1 flex items-baseline gap-1.5 tabular-nums">
                           <span className="text-4xl font-bold tracking-tight text-text-primary">{report.grading.score}</span>
                           <span className="text-base font-medium text-text-muted">/ 100</span>
@@ -1015,7 +1051,7 @@ export default function Diagnostics() {
                         {t('diag.valuation.ofBase', { percent: Math.round(report.grading.valuation_multiplier * 100) })}
                       </div>
                       <div className="text-[13px] text-text-secondary mt-0.5 tabular-nums">
-                        {t('diag.testsPassed', { passed: report.grading.passed_count, total: report.grading.total_count })}
+                        {testsSummary}
                       </div>
                     </div>
                   </div>
@@ -1033,10 +1069,16 @@ export default function Diagnostics() {
                         ))}
                       </ul>
                     </div>
-                  ) : (
+                  ) : !report.grading.provisional ? (
                     <div className="mt-5 pt-4 border-t border-border-light text-[13px] text-accent-green flex items-center gap-1.5">
                       <Sparkles size={14} />
                       {t('diagnostics.noDefects')}
+                    </div>
+                  ) : null}
+                  {report.grading.provisional && (
+                    <div className="mt-5 pt-4 border-t border-border-light text-[13px] text-text-secondary flex items-start gap-2">
+                      <Info size={14} className="mt-0.5 flex-shrink-0 text-accent-blue" />
+                      <span>{t('diag.pendingTests', { count: report.grading.pending_tests ?? 0, total: report.grading.total_count })}</span>
                     </div>
                   )}
                 </div>
@@ -1113,7 +1155,7 @@ export default function Diagnostics() {
                     {t('diag.suite.studio')}
                   </button>
                   <span className="text-[13px] font-semibold px-2.5 py-1 rounded-full bg-surface text-accent-blue border border-border">
-                    {t('diag.passedRatio', { passed: report.grading.passed_count, total: report.grading.total_count })}
+                    {testsSummary}
                   </span>
                 </div>
               </div>
@@ -1137,40 +1179,69 @@ export default function Diagnostics() {
 
               {/* Test Results: one row per test, status dot + icon, hairline dividers */}
               <div className="max-h-[420px] overflow-y-auto divide-y divide-border-light border-y border-border-light">
-                {filteredTests.map((test) => (
-                  <div key={test.key} className="flex items-center justify-between gap-4 py-3">
-                    <div className="flex items-start gap-3 min-w-0">
-                      <span
-                        aria-hidden="true"
-                        className={`mt-2 w-2 h-2 rounded-full flex-shrink-0 ${test.passed ? 'bg-accent-green' : 'bg-accent-red'}`}
-                      />
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5 text-[13px] font-medium text-text-primary">
-                          {test.passed ? (
-                            <CheckCircle2 className="w-4 h-4 text-accent-green flex-shrink-0" aria-hidden="true" />
-                          ) : (
-                            <XCircle className="w-4 h-4 text-accent-red flex-shrink-0" aria-hidden="true" />
-                          )}
-                          <span className="truncate">{test.name}</span>
-                        </div>
-                        <div className="text-[13px] text-text-muted mt-0.5 line-clamp-2">
-                          {test.details || t('diag.test.defaultDetail')}
+                {filteredTests.map((test) => {
+                  const pending = !test.tested && !test.passed;
+                  return (
+                    <div key={test.key} className="flex items-center justify-between gap-4 py-3">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <span
+                          aria-hidden="true"
+                          className={`mt-2 w-2 h-2 rounded-full flex-shrink-0 ${
+                            pending ? 'bg-text-muted' : test.passed ? 'bg-accent-green' : 'bg-accent-red'
+                          }`}
+                        />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 text-[13px] font-medium text-text-primary">
+                            {pending ? (
+                              <Circle className="w-4 h-4 text-text-muted flex-shrink-0" aria-hidden="true" />
+                            ) : test.passed ? (
+                              <CheckCircle2 className="w-4 h-4 text-accent-green flex-shrink-0" aria-hidden="true" />
+                            ) : (
+                              <XCircle className="w-4 h-4 text-accent-red flex-shrink-0" aria-hidden="true" />
+                            )}
+                            <span className="truncate">{test.name}</span>
+                            {pending && (
+                              <span className="badge bg-surface text-text-muted flex-shrink-0">{t('diag.test.notTested')}</span>
+                            )}
+                          </div>
+                          <div className="text-[13px] text-text-muted mt-0.5 line-clamp-2">
+                            {pending
+                              ? t('diag.test.expected', { details: test.details || t('diag.test.defaultDetail') })
+                              : test.details || t('diag.test.defaultDetail')}
+                          </div>
                         </div>
                       </div>
-                    </div>
 
-                    <button
-                      onClick={() => toggleHardwareTest(test.key, test.passed)}
-                      className={`flex-shrink-0 px-3 py-1 rounded-full text-[13px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-navy/30 ${
-                        test.passed
-                          ? 'bg-accent-green/10 text-accent-green hover:bg-accent-red/10 hover:text-accent-red'
-                          : 'bg-accent-red/10 text-accent-red hover:bg-accent-green/10 hover:text-accent-green'
-                      }`}
-                    >
-                      {test.passed ? t('diagnostics.pass') : t('diagnostics.fail')}
-                    </button>
-                  </div>
-                ))}
+                      {pending ? (
+                        <div className="flex flex-shrink-0 items-center gap-1.5">
+                          <button
+                            onClick={() => handleUpdateHardwareTest(test.key, true)}
+                            className="px-3 py-1 rounded-full text-[13px] font-semibold bg-surface text-text-secondary hover:bg-accent-green/10 hover:text-accent-green transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-navy/30"
+                          >
+                            {t('diagnostics.pass')}
+                          </button>
+                          <button
+                            onClick={() => handleUpdateHardwareTest(test.key, false)}
+                            className="px-3 py-1 rounded-full text-[13px] font-semibold bg-surface text-text-secondary hover:bg-accent-red/10 hover:text-accent-red transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-navy/30"
+                          >
+                            {t('diagnostics.fail')}
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => toggleHardwareTest(test.key, test.passed)}
+                          className={`flex-shrink-0 px-3 py-1 rounded-full text-[13px] font-semibold transition-colors focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-navy/30 ${
+                            test.passed
+                              ? 'bg-accent-green/10 text-accent-green hover:bg-accent-red/10 hover:text-accent-red'
+                              : 'bg-accent-red/10 text-accent-red hover:bg-accent-green/10 hover:text-accent-green'
+                          }`}
+                        >
+                          {test.passed ? t('diagnostics.pass') : t('diagnostics.fail')}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
@@ -1273,6 +1344,15 @@ export default function Diagnostics() {
               <div className="flex justify-between">
                 <span className="text-text-muted">{t('diag.qr.pin')}</span>
                 <span className="font-mono text-accent-green font-bold">{serverInfo.pin}</span>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2 rounded-xl border border-accent-orange/30 bg-accent-orange/10 p-3 text-[13px] text-text-secondary">
+              <Info size={14} className="mt-0.5 flex-shrink-0 text-accent-orange" />
+              <div className="space-y-1">
+                <p>{t('diag.qr.sameWifi')}</p>
+                <p>{t('diag.qr.certWarning')}</p>
+                {report?.brand === 'Apple' && <p>{t('diag.qr.iphoneLimits')}</p>}
               </div>
             </div>
 
@@ -1460,12 +1540,15 @@ export default function Diagnostics() {
 
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
                 <div className="font-bold text-slate-800">{t('diag.cert.batteryAudit')}</div>
-                <div>{t('diag.cert.healthCondition')} {report.battery.health_percentage}%</div>
+                <div>
+                  {t('diag.cert.healthCondition')} {report.battery.health_percentage}%
+                  {report.battery.estimated && <span className="text-amber-700"> · {t('diag.battery.estimated')}</span>}
+                </div>
                 <div>{t('diag.cert.cycleCount')} {report.battery.cycle_count} {t('diag.cycles')}</div>
                 <div>
                   {t('diag.cert.actualCapacity')} {report.battery.actual_capacity_mah} / {report.battery.design_capacity_mah} mAh
                 </div>
-                <div>{t('diag.cert.cellSupplier')} {report.battery.manufacturer || t('diag.oemStandard')}</div>
+                <div>{t('diag.cert.cellSupplier')} {report.battery.manufacturer || t('diag.battery.notReported')}</div>
               </div>
             </div>
 
