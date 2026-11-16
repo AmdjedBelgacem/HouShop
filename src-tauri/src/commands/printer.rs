@@ -350,3 +350,17 @@ pub async fn print_label(
         Err("RAW printing is only supported on Windows".to_string())
     }
 }
+
+/// Send a pre-formatted raw TSPL byte stream directly to `printer_name` via Windows Spooler.
+#[tauri::command]
+pub async fn print_label_tspl(printer_name: String, payload: Vec<u8>) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        win::send_raw_job(&printer_name, &payload)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (printer_name, payload);
+        Err("RAW printing is only supported on Windows".to_string())
+    }
+}

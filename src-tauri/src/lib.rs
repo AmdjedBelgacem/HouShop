@@ -111,6 +111,7 @@ pub fn run() {
             commands::dashboard::get_inventory_valuation,
             commands::printer::list_printers,
             commands::printer::print_label,
+            commands::printer::print_label_tspl,
             commands::transfer::get_phone_tool_status,
             commands::transfer::list_transfer_devices,
             commands::transfer::refresh_transfer_devices,
