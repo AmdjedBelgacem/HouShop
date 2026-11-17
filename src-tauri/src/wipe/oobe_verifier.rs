@@ -44,7 +44,7 @@ impl OobeVerifier {
         // 1. The device must report that first-time setup has NOT been completed.
         //    `settings get` prints "null" when the key is unset, which is the post-wipe state.
         //    (ro.setupwizard.mode is a build property and does not change on wipe.)
-        let setup_out = Command::new("adb")
+        let setup_out = crate::transfer::adb::adb_command()
             .args(["-s", serial, "shell", "settings", "get", "secure", "user_setup_complete"])
             .output()
             .await;
@@ -59,7 +59,7 @@ impl OobeVerifier {
 
         // 2. The account dump must succeed AND contain no accounts. A failed dumpsys is
         //    not evidence that the accounts are gone.
-        let accounts_out = Command::new("adb")
+        let accounts_out = crate::transfer::adb::adb_command()
             .args(["-s", serial, "shell", "dumpsys", "account"])
             .output()
             .await;

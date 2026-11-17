@@ -46,7 +46,7 @@ impl LockInspector {
 
         if platform.eq_ignore_ascii_case("android") {
             // Send Android Intent to open Accounts sync settings directly on the phone display
-            let output = Command::new("adb")
+            let output = crate::transfer::adb::adb_command()
                 .args(["-s", device_id, "shell", "am", "start", "-a", "android.settings.SYNC_SETTINGS"])
                 .output()
                 .await;
@@ -57,7 +57,7 @@ impl LockInspector {
                 }
                 _ => {
                     // Fallback to main Settings screen
-                    let fallback = Command::new("adb")
+                    let fallback = crate::transfer::adb::adb_command()
                         .args(["-s", device_id, "shell", "am", "start", "-a", "android.settings.SETTINGS"])
                         .output()
                         .await;
@@ -236,15 +236,15 @@ impl LockInspector {
 
     /// Inspect Android / HarmonyOS device via ADB
     async fn inspect_android(&self, serial: &str) -> Result<PreWipeAuditResult, String> {
-        let brand_out = Command::new("adb")
+        let brand_out = crate::transfer::adb::adb_command()
             .args(["-s", serial, "shell", "getprop", "ro.product.brand"])
             .output()
             .await;
-        let model_out = Command::new("adb")
+        let model_out = crate::transfer::adb::adb_command()
             .args(["-s", serial, "shell", "getprop", "ro.product.model"])
             .output()
             .await;
-        let os_out = Command::new("adb")
+        let os_out = crate::transfer::adb::adb_command()
             .args(["-s", serial, "shell", "getprop", "ro.build.version.release"])
             .output()
             .await;
@@ -272,7 +272,7 @@ impl LockInspector {
 
         // Battery
         let battery_level = {
-            let batt_out = Command::new("adb")
+            let batt_out = crate::transfer::adb::adb_command()
                 .args(["-s", serial, "shell", "dumpsys", "battery"])
                 .output()
                 .await
@@ -289,7 +289,7 @@ impl LockInspector {
         };
 
         // Inspect accounts via `dumpsys account`
-        let accounts_out = Command::new("adb")
+        let accounts_out = crate::transfer::adb::adb_command()
             .args(["-s", serial, "shell", "dumpsys", "account"])
             .output()
             .await

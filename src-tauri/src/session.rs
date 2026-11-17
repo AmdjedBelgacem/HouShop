@@ -1,12 +1,16 @@
 //! Backend session: who is signed in, enforced for every command.
 //!
-//! The session lives only in memory, so closing the app signs everyone out.
+//! The signed-in user is kept in memory and also remembered in a small file in
+//! the app data folder, so closing and reopening the app keeps them signed in
+//! until they choose to sign out (`remember` / `forget` / `restore`).
 //! `guard` is called from the central invoke handler in `lib.rs`; any command
 //! not listed in `PUBLIC_COMMANDS` is rejected unless a user is signed in.
 //! New commands are therefore protected by default.
 
 use crate::models::User;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use tauri::{AppHandle, Manager};
 
 /// Commands that must work before anyone has signed in: the sign-in and
 /// first-run setup screens, and the branding shown on them.
@@ -46,6 +50,55 @@ impl SessionState {
             .unwrap_or_else(|e| e.into_inner())
             .as_ref()
             .map(|s| s.user.clone())
+    }
+}
+
+const SESSION_FILE: &str = "session.json";
+
+fn session_file(app: &AppHandle) -> Option<PathBuf> {
+    let dir = app.path().app_data_dir().ok()?;
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir.join(SESSION_FILE))
+}
+
+/// Remember who signed in so the next launch can restore the session.
+pub fn remember(app: &AppHandle, user_id: i64) {
+    if let Some(file) = session_file(app) {
+        write_remembered(&file, user_id);
+    }
+}
+
+/// Forget the remembered session (called on sign-out).
+pub fn forget(app: &AppHandle) {
+    if let Some(file) = session_file(app) {
+        let _ = std::fs::remove_file(file);
+    }
+}
+
+fn write_remembered(file: &Path, user_id: i64) {
+    let _ = std::fs::write(file, serde_json::json!({ "user_id": user_id }).to_string());
+}
+
+fn read_remembered(file: &Path) -> Option<i64> {
+    let text = std::fs::read_to_string(file).ok()?;
+    serde_json::from_str::<serde_json::Value>(&text).ok()?.get("user_id")?.as_i64()
+}
+
+/// Restores the remembered session at startup. The account must still exist;
+/// if it was deleted the remembered session is dropped.
+pub async fn restore(app: &AppHandle, pool: &sqlx::SqlitePool, state: &SessionState) {
+    let Some(file) = session_file(app) else { return };
+    let Some(id) = read_remembered(&file) else { return };
+    match sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+    {
+        Ok(Some(user)) => state.start(user),
+        Ok(None) => {
+            let _ = std::fs::remove_file(file);
+        }
+        Err(_) => {} // database trouble: stay signed out, keep the file
     }
 }
 
@@ -106,6 +159,19 @@ mod tests {
         for c in PUBLIC_COMMANDS {
             assert!(is_allowed(c, &s), "{c}");
         }
+    }
+
+    #[test]
+    fn remembered_session_round_trips() {
+        let dir = std::env::temp_dir().join(format!("houshop-session-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join(SESSION_FILE);
+        assert_eq!(read_remembered(&file), None);
+        write_remembered(&file, 7);
+        assert_eq!(read_remembered(&file), Some(7));
+        std::fs::write(&file, "garbage").unwrap();
+        assert_eq!(read_remembered(&file), None);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

@@ -64,8 +64,7 @@ pub async fn launch_mobile_companion_on_device(
     connect_url: String,
 ) -> Result<String, String> {
     if platform.to_lowercase() == "android" {
-        let adb_path = std::path::PathBuf::from("adb");
-        let output = tokio::process::Command::new(adb_path)
+        let output = crate::transfer::adb::adb_command()
             .args([
                 "-s",
                 &device_id,

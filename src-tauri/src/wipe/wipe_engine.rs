@@ -286,7 +286,12 @@ impl WipeEngine {
 /// Runs an external tool. Returns Ok(exit_succeeded) when it ran, and Err when it could not
 /// be started, so a missing tool can never be mistaken for a successful command.
 async fn run_tool(program: &str, args: &[&str]) -> Result<bool, String> {
-    match Command::new(program).args(args).output().await {
+    let mut cmd = if program == "adb" {
+        crate::transfer::adb::adb_command()
+    } else {
+        Command::new(program)
+    };
+    match cmd.args(args).output().await {
         Ok(out) => Ok(out.status.success()),
         Err(e) => Err(format!(
             "Could not run '{}': {}. Make sure the Android platform tools are installed and available on PATH.",

@@ -1,10 +1,11 @@
 use serde::Deserialize;
 use sqlx::SqlitePool;
-use tauri::State;
+use tauri::{AppHandle, State};
 use crate::models::{LoginRequest, LoginResponse, User};
 use crate::session::SessionState;
 #[tauri::command]
 pub async fn login(
+    app: AppHandle,
     pool: State<'_, SqlitePool>,
     session: State<'_, SessionState>,
     request: LoginRequest,
@@ -23,6 +24,7 @@ pub async fn login(
     }
     let token = uuid::Uuid::new_v4().to_string();
     session.start(user.clone());
+    crate::session::remember(&app, user.id);
     Ok(LoginResponse { user, token })
 }
 
@@ -34,8 +36,9 @@ pub fn session_user(session: State<'_, SessionState>) -> Option<User> {
 }
 
 #[tauri::command]
-pub fn logout(session: State<'_, SessionState>) {
+pub fn logout(app: AppHandle, session: State<'_, SessionState>) {
     session.end();
+    crate::session::forget(&app);
 }
 
 const MIN_PASSWORD_LEN: usize = 8;

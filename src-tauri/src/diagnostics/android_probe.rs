@@ -10,13 +10,13 @@ use std::process::Stdio;
 use tokio::process::Command;
 
 pub struct AndroidProbe {
-    adb_path: PathBuf,
+    /// Test hook: use this adb instead of the one found on the machine.
+    adb_path: Option<PathBuf>,
 }
 
 impl AndroidProbe {
     pub fn new() -> Self {
-        let adb_path = resolve_adb_tool().unwrap_or_else(|| PathBuf::from("adb"));
-        Self { adb_path }
+        Self { adb_path: None }
     }
 
     pub async fn probe_device(
@@ -310,7 +310,10 @@ impl AndroidProbe {
     }
 
     async fn exec_adb(&self, serial: &str, args: &[&str]) -> Result<String, String> {
-        let mut cmd = Command::new(&self.adb_path);
+        let mut cmd = match &self.adb_path {
+            Some(p) => Command::new(p),
+            None => crate::transfer::adb::adb_command(),
+        };
         if !serial.is_empty() {
             cmd.arg("-s").arg(serial);
         }
@@ -378,49 +381,6 @@ fn parse_dumpsys_battery(text: &str) -> (Option<u8>, Option<f32>, Option<bool>) 
     (level, temp, charging)
 }
 
-fn resolve_adb_tool() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var("ADB_PATH") {
-        let p = PathBuf::from(path);
-        if is_file_executable(&p) {
-            return Some(p);
-        }
-    }
-
-    if let Ok(home) = std::env::var("HOME") {
-        let mac_sdk_path = PathBuf::from(home).join("Library/Android/sdk/platform-tools/adb");
-        if is_file_executable(&mac_sdk_path) {
-            return Some(mac_sdk_path);
-        }
-    }
-
-    let default_names = ["adb", "/opt/homebrew/bin/adb", "/usr/local/bin/adb"];
-    for name in &default_names {
-        let p = PathBuf::from(name);
-        if is_file_executable(&p) {
-            return Some(p);
-        }
-    }
-
-    None
-}
-
-fn is_file_executable(path: &PathBuf) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(metadata) = std::fs::metadata(path) {
-            return metadata.is_file() && (metadata.permissions().mode() & 0o111 != 0);
-        }
-    }
-    #[cfg(windows)]
-    {
-        if path.exists() {
-            return true;
-        }
-    }
-    false
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -430,7 +390,7 @@ mod tests {
     #[tokio::test]
     async fn missing_adb_gives_a_plain_message() {
         let probe = AndroidProbe {
-            adb_path: PathBuf::from("/nonexistent/path/to/adb"),
+            adb_path: Some(PathBuf::from("/nonexistent/path/to/adb")),
         };
         let err = probe.probe_device("ABC123").await.unwrap_err();
         assert!(err.contains("not installed"), "{err}");

@@ -26,8 +26,12 @@ pub fn run() {
             let diagnostic_state = commands::diagnostics::DiagnosticState::new(pool.clone());
             let wipe_state = commands::wipe::WipeState::new(pool.clone());
 
+            // Stay signed in across restarts until the user signs out.
+            let session_state = session::SessionState::default();
+            tauri::async_runtime::block_on(session::restore(app.handle(), &pool, &session_state));
+
             app.manage(pool);
-            app.manage(session::SessionState::default());
+            app.manage(session_state);
             app.manage(detector.clone());
             app.manage(engine);
             app.manage(wifi_mgr);
