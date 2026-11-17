@@ -3,6 +3,7 @@ import { useAuth } from '../hooks/authContext';
 import { useI18n } from '../i18n';
 import { useBranding } from '../hooks/brandingContext';
 import UpdateBanner from './UpdateBanner';
+import ThemeToggle from './ThemeToggle';
 import {
   LayoutGrid, ClipboardList, Clock, Users, ShoppingCart, Plus,
   LogOut, CalendarCheck, RotateCcw, Calculator, Smartphone,
@@ -52,8 +53,8 @@ const navGroups: { key: string; items: NavItem[] }[] = [
 
 const itemBase =
   'flex w-full items-center gap-3 h-10 rounded-full px-3 text-left text-[14px] font-medium transition-colors duration-150';
-const itemOn = 'bg-[rgba(250,248,253,0.11)] text-text-primary';
-const itemOff = 'text-text-secondary hover:bg-[rgba(250,248,253,0.04)] hover:text-text-primary';
+const itemOn = 'bg-[rgb(var(--ink)/0.11)] text-text-primary';
+const itemOff = 'text-text-secondary hover:bg-[rgb(var(--ink)/0.05)] hover:text-text-primary';
 
 export default function Layout({ children, currentPage, onNavigate }: LayoutProps) {
   const { user, logout } = useAuth();
@@ -82,7 +83,7 @@ export default function Layout({ children, currentPage, onNavigate }: LayoutProp
           className="flex items-center gap-3 rounded-xl px-3 text-left"
         >
           {/* Logos are often dark artwork: a light tile keeps them visible on the dark rail. */}
-          <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] bg-[#faf8fd] p-1">
+          <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] bg-[#faf8fd] p-1 ring-1 ring-border-light">
             <img src={logoUrl} alt="" className="h-full w-full object-contain" />
           </span>
           <span className="flex min-w-0 flex-col gap-1">
@@ -117,7 +118,7 @@ export default function Layout({ children, currentPage, onNavigate }: LayoutProp
                     aria-current={active ? 'page' : undefined}
                     className={`${itemBase} ${active ? itemOn : itemOff}`}
                   >
-                    <span className={`flex-shrink-0 ${active ? 'text-[#93c5fd]' : 'text-text-muted'}`}>{item.icon}</span>
+                    <span className={`flex-shrink-0 ${active ? 'text-pink-ink' : 'text-text-muted'}`}>{item.icon}</span>
                     <span className="truncate">{t(item.key)}</span>
                   </button>
                 );
@@ -133,17 +134,17 @@ export default function Layout({ children, currentPage, onNavigate }: LayoutProp
             aria-current={settingsActive ? 'page' : undefined}
             className={`${itemBase} ${settingsActive ? itemOn : itemOff}`}
           >
-            <Settings {...ICON} className={settingsActive ? 'text-[#93c5fd]' : 'text-text-muted'} />
+            <Settings {...ICON} className={settingsActive ? 'text-pink-ink' : 'text-text-muted'} />
             {t('sidebar.settings')}
           </button>
           <button onClick={logout} className={`${itemBase} ${itemOff}`}>
             <LogOut {...ICON} className="text-text-muted" />
             {t('sidebar.logout')}
           </button>
-          <div className="mt-3 flex items-center gap-3 rounded-[14px] bg-[rgba(250,248,253,0.04)] px-3 py-2.5">
+          <div className="mt-3 flex items-center gap-3 rounded-[14px] bg-[rgb(var(--ink)/0.05)] px-3 py-2.5">
             <span
               aria-hidden="true"
-              className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[rgba(59,130,246,0.14)] text-[14px] font-semibold text-[#93c5fd]"
+              className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[rgba(59,130,246,0.14)] text-[14px] font-semibold text-pink-ink"
             >
               {displayName.charAt(0)}
             </span>
@@ -151,6 +152,7 @@ export default function Layout({ children, currentPage, onNavigate }: LayoutProp
               <span className="truncate text-[14px] font-semibold leading-[18px] text-text-primary">{displayName}</span>
               <span className="truncate text-[12px] leading-4 text-text-muted">{t('sidebar.ownerDevice')}</span>
             </span>
+            <ThemeToggle className="ms-auto flex-shrink-0" />
           </div>
         </div>
       </aside>

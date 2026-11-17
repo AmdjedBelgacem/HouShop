@@ -3,10 +3,12 @@
 // Loaded as an external script so the app can use a strict Content-Security-Policy.
 (function () {
   try {
-    if (localStorage.getItem('shop_theme') === 'dark') {
-      document.documentElement.classList.add('dark');
-    }
-  } catch (e) { /* ignore */ }
+    var light = localStorage.getItem('shop_theme') === 'light';
+    document.documentElement.setAttribute('data-theme', light ? 'light' : 'dark');
+    if (!light) document.documentElement.classList.add('dark');
+  } catch (e) {
+    document.documentElement.setAttribute('data-theme', 'dark');
+  }
   try {
     var customLogo = localStorage.getItem('shop_logo_data_url');
     if (customLogo && customLogo.indexOf('data:image/') === 0) {

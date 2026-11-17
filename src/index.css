@@ -44,7 +44,9 @@
  * hairline edge, one blue accent used only for state, Geist text with JetBrains Mono labels.
  *
  * Token names are stable: every page references them, so the values below restyle the app.
- * The product has one theme; `.dark` keeps the same values so the old toggle cannot split it.
+ * Two themes share these tokens. Dark is the default and lives in @theme below; light overrides
+ * the same names under html[data-theme="light"]. Translucent "ink" overlays use --ink (an RGB
+ * triplet) so a hairline or hover fill is white-ish on dark and navy-ish on light.
  */
 
 @theme {
@@ -85,17 +87,92 @@
   /* Charts */
   --color-chart-navy: #60a5fa;
   --color-chart-gray: #a4a1a8;
-  --color-chart-light: rgba(250, 248, 253, 0.08);
-  --color-donut-bg: rgba(250, 248, 253, 0.07);
+  --color-chart-light: rgb(var(--ink) / 0.08);
+  --color-donut-bg: rgb(var(--ink) / 0.07);
 
   --radius-card: 14px;
-  --shadow-card: inset 0 1px 0 rgba(250, 248, 253, 0.06), 0 1px 2px rgba(0, 0, 0, 0.38), 0 10px 30px -14px rgba(0, 0, 0, 0.5);
+  --shadow-card: inset 0 1px 0 rgb(var(--ink) / 0.06), 0 1px 2px rgba(0, 0, 0, 0.38), 0 10px 30px -14px rgba(0, 0, 0, 0.5);
   --shadow-raised: 0 2px 6px rgba(0, 0, 0, 0.42), 0 28px 70px -24px rgba(0, 0, 0, 0.55);
 }
 
-:root,
-.dark {
+:root {
   color-scheme: dark;
+  --ink: 250 248 253;
+  --input-border: rgb(250 248 253 / 0.42);
+  --glass-bg: rgba(7, 11, 22, 0.88);
+  --glow-1: rgba(37, 99, 235, 0.34);
+  --glow-2: rgba(59, 130, 246, 0.12);
+  --on-bright: #060a14;
+  --focus-ring: #60a5fa;
+  --selection: rgba(59, 130, 246, 0.35);
+  --danger-fill: #ff4d6a;
+  --danger-fill-hover: #fe738a;
+  --danger-ink: #060a14;
+}
+
+/* ---------- Light theme: same tokens, light values ---------- */
+html[data-theme="light"] {
+  color-scheme: light;
+  --ink: 15 23 42;
+  --input-border: rgb(15 23 42 / 0.28);
+  --glass-bg: rgba(255, 255, 255, 0.86);
+  --glow-1: rgba(37, 99, 235, 0.14);
+  --glow-2: rgba(59, 130, 246, 0.07);
+  --on-bright: #ffffff;
+  --focus-ring: #2563eb;
+  --selection: rgba(37, 99, 235, 0.22);
+  --danger-fill: #dc2626;
+  --danger-fill-hover: #b91c1c;
+  --danger-ink: #ffffff;
+
+  --color-surface: #eff2f8;
+  --color-sidebar: #ffffff;
+  --color-card: #ffffff;
+  --color-raised: #f7f9fd;
+
+  --color-border: rgba(30, 48, 96, 0.2);
+  --color-border-light: rgba(30, 48, 96, 0.11);
+
+  --color-text-primary: #0b1220;
+  --color-text-secondary: #424a5e;
+  --color-text-muted: #5f6879;
+
+  --color-navy: #2563eb;
+  --color-navy-light: #1d4ed8;
+  --color-pink: #2563eb;
+  --color-pink-ink: #1d4ed8;
+
+  --color-accent-blue: #2563eb;
+  --color-accent-purple: #2563eb;
+  --color-accent-green: #0f766e;
+  --color-accent-teal: #0f766e;
+  --color-accent-orange: #b45309;
+  --color-accent-red: #dc2626;
+
+  --color-chart-navy: #2563eb;
+  --color-chart-gray: #8a93a6;
+  --color-chart-light: rgba(15, 23, 42, 0.07);
+  --color-donut-bg: rgba(15, 23, 42, 0.07);
+
+  --shadow-card: 0 1px 2px rgba(20, 32, 70, 0.07), 0 8px 24px -12px rgba(20, 32, 70, 0.16);
+  --shadow-raised: 0 2px 6px rgba(20, 32, 70, 0.1), 0 28px 70px -24px rgba(20, 32, 70, 0.28);
+}
+
+/* A surface that stays dark in the light theme (the phone mock's screen): put the dark
+   values back for everything inside it, so accent text on it stays readable. */
+html[data-theme="light"] .force-dark {
+  color-scheme: dark;
+  --ink: 250 248 253;
+  --on-bright: #060a14;
+  --color-accent-blue: #60a5fa;
+  --color-accent-purple: #60a5fa;
+  --color-accent-green: #2dd4bf;
+  --color-accent-teal: #2dd4bf;
+  --color-accent-orange: #fcd772;
+  --color-accent-red: #fe738a;
+  --color-text-primary: #faf8fd;
+  --color-text-secondary: #c5c3c9;
+  --color-text-muted: #a4a1a8;
 }
 
 * {
@@ -109,11 +186,11 @@ html {
 body {
   @apply text-text-primary antialiased;
   font-family: var(--font-sans);
-  background-color: #060a14;
+  background-color: var(--color-surface);
   /* The page glow: one static blue radial at the top centre and a faint blue bloom top right. */
   background-image:
-    radial-gradient(1100px 520px at 55% -160px, rgba(37, 99, 235, 0.34), transparent 70%),
-    radial-gradient(560px 340px at 100% -40px, rgba(59, 130, 246, 0.12), transparent 70%);
+    radial-gradient(1100px 520px at 55% -160px, var(--glow-1), transparent 70%),
+    radial-gradient(560px 340px at 100% -40px, var(--glow-2), transparent 70%);
   background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -121,19 +198,18 @@ body {
 
 /* A solid blue focus ring on every focusable element, never removed. */
 :focus-visible {
-  outline: 2px solid #60a5fa;
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
-::selection { background: rgba(59, 130, 246, 0.35); color: #faf8fd; }
+::selection { background: var(--selection); color: var(--color-text-primary); }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(250, 248, 253, 0.14); border-radius: 999px; border: 3px solid transparent; background-clip: padding-box; }
-::-webkit-scrollbar-thumb:hover { background: rgba(250, 248, 253, 0.26); background-clip: padding-box; }
+::-webkit-scrollbar-thumb { background: rgb(var(--ink) / 0.18); border-radius: 999px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--ink) / 0.26); background-clip: padding-box; }
 
-select, input, textarea { color-scheme: dark; }
-option { background: #1c2437; color: #faf8fd; }
+option { background: var(--color-raised); color: var(--color-text-primary); }
 
 /* ---------- Overrides one token cannot express ---------- */
 
@@ -147,22 +223,23 @@ html[lang="ar"] .font-mono { letter-spacing: 0; }
 html[lang="ar"] .eyebrow,
 html[lang="ar"] .eyebrow-accent { font-family: var(--font-sans); text-transform: none; }
 
-/* The accent as text reads as light blue on the dark ground (primary-fill is too dark for text). */
-.text-navy { color: #93c5fd; }
-.hover\:text-navy:hover { color: #93c5fd; }
+/* The accent as text reads as light blue on the dark ground and deep blue on the light one (primary-fill is too dark/light for text). */
+.text-navy { color: var(--color-pink-ink); }
+.hover\:text-navy:hover { color: var(--color-pink-ink); }
 
-/* Bright fills carry dark labels: white on teal, gold or coral fails contrast. */
+/* Bright fills carry dark labels on the dark theme: white on teal, gold or coral fails contrast there.
+   The light theme's fills are deeper, so white stays readable (--on-bright is white). */
 .bg-accent-green.text-white,
 .bg-accent-teal.text-white,
 .bg-accent-orange.text-white,
 .bg-accent-red.text-white,
 .bg-accent-blue.text-white,
-.bg-accent-purple.text-white { color: #060a14; }
+.bg-accent-purple.text-white { color: var(--on-bright); }
 
 /* Inside a raised surface, "surface" fills and hovers lift (fill-1) instead of sinking to the ground. */
 .card .bg-surface,
-.bg-card .bg-surface { background-color: rgba(250, 248, 253, 0.04); }
-.hover\:bg-surface:hover { background-color: rgba(250, 248, 253, 0.06); }
+.bg-card .bg-surface { background-color: rgb(var(--ink) / 0.04); }
+.hover\:bg-surface:hover { background-color: rgb(var(--ink) / 0.06); }
 
 /* Component classes live in a layer so utility classes (pl-10, py-3, ...) can still override them. */
 @layer components {
@@ -175,7 +252,7 @@ html[lang="ar"] .eyebrow-accent { font-family: var(--font-sans); text-transform:
 }
 
 .glass {
-  background: rgba(7, 11, 22, 0.88);
+  background: var(--glass-bg);
   -webkit-backdrop-filter: saturate(160%) blur(18px);
   backdrop-filter: saturate(160%) blur(18px);
 }
@@ -185,10 +262,10 @@ html[lang="ar"] .eyebrow-accent { font-family: var(--font-sans); text-transform:
   @apply w-full h-10 px-3 rounded-[10px] border text-[14px] text-text-primary
          placeholder:text-text-muted transition-[border-color,background-color] duration-150
          focus:outline-none;
-  border-color: rgba(250, 248, 253, 0.42);
-  background-color: rgba(250, 248, 253, 0.04);
+  border-color: var(--input-border);
+  background-color: rgb(var(--ink) / 0.04);
 }
-.form-input:focus { border-color: #60a5fa; background-color: rgba(250, 248, 253, 0.06); }
+.form-input:focus { border-color: #60a5fa; background-color: rgb(var(--ink) / 0.06); }
 textarea.form-input { height: auto; padding-top: 10px; padding-bottom: 10px; }
 
 /* ---------- Buttons ---------- */
@@ -203,12 +280,12 @@ textarea.form-input { height: auto; padding-top: 10px; padding-bottom: 10px; }
 .btn-primary { background-color: #2563eb; color: #faf8fd; }
 .btn-primary:hover { background-color: #1d4ed8; }
 .btn-primary:active { background-color: #1e40af; }
-.btn-secondary { background-color: rgba(250, 248, 253, 0.07); color: #faf8fd; border: 1px solid rgba(250, 248, 253, 0.42); }
-.btn-secondary:hover { background-color: rgba(250, 248, 253, 0.11); }
-.btn-ghost { color: #c5c3c9; }
-.btn-ghost:hover { background-color: rgba(250, 248, 253, 0.06); color: #faf8fd; }
-.btn-danger { background-color: #ff4d6a; color: #060a14; }
-.btn-danger:hover { background-color: #fe738a; }
+.btn-secondary { background-color: rgb(var(--ink) / 0.07); color: var(--color-text-primary); border: 1px solid var(--input-border); }
+.btn-secondary:hover { background-color: rgb(var(--ink) / 0.11); }
+.btn-ghost { color: var(--color-text-secondary); }
+.btn-ghost:hover { background-color: rgb(var(--ink) / 0.06); color: var(--color-text-primary); }
+.btn-danger { background-color: var(--danger-fill); color: var(--danger-ink); }
+.btn-danger:hover { background-color: var(--danger-fill-hover); }
 
 /* ---------- Badges ---------- */
 .badge {
@@ -246,7 +323,7 @@ textarea.form-input { height: auto; padding-top: 10px; padding-bottom: 10px; }
 .eyebrow-accent {
   font-family: var(--font-mono);
   @apply inline-flex items-center gap-2.5 text-[12px] leading-4 font-medium uppercase tracking-[0.14em];
-  color: #93c5fd;
+  color: var(--color-pink-ink);
 }
 .eyebrow-accent::before {
   content: "";

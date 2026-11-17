@@ -137,7 +137,7 @@ export default function PhoneMockup({
 
         {/* Internal Screen Area */}
         <div
-          className={`w-full h-full rounded-[38px] overflow-hidden flex flex-col justify-between relative text-white ${
+          className={`force-dark w-full h-full rounded-[38px] overflow-hidden flex flex-col justify-between relative text-white ${
             isApple
               ? 'bg-gradient-to-b from-slate-900 via-indigo-950/70 to-slate-950'
               : isSamsung

@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="dark light" />
     <title>HouPhone Shop</title>
     <style>
       /* Loading splash, shown before React mounts. Same ground and glow as the app (QR-Sense dark). */
@@ -97,6 +97,18 @@
         background: #3b82f6;
         animation: loader-slide 1.2s ease-in-out infinite;
       }
+      /* Light theme (data-theme is set by boot-theme.js before first paint). */
+      html[data-theme="light"], html[data-theme="light"] body { background: #eff2f8; }
+      html[data-theme="light"] #splash {
+        background-color: #eff2f8;
+        background-image:
+          radial-gradient(900px 520px at 50% -120px, rgba(37, 99, 235, 0.16), transparent 70%),
+          radial-gradient(520px 340px at 85% 0, rgba(59, 130, 246, 0.08), transparent 70%);
+      }
+      html[data-theme="light"] #splash .tile { box-shadow: 0 0 0 1px rgba(30, 48, 96, 0.14); }
+      html[data-theme="light"] #splash .brand { color: #0b1220; }
+      html[data-theme="light"] #splash .subtitle { color: #1d4ed8; }
+      html[data-theme="light"] #splash .loader { background: rgba(15, 23, 42, 0.1); }
       @keyframes loader-slide {
         0% { left: -40%; }
         100% { left: 100%; }

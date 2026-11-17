@@ -7,15 +7,17 @@ import { uiLocale } from '../i18n/locale';
 import { useBranding } from '../hooks/brandingContext';
 import { DEFAULT_SHOP_NAME } from '../hooks/useBranding';
 import CustomSelect from '../components/CustomSelect';
+import { useTheme } from '../theme';
 import { toast } from 'sonner';
 import {
-  KeyRound, Eye, EyeOff, Globe,
+  KeyRound, Eye, EyeOff, Globe, Sun, Moon,
   ImagePlus, Trash2, Loader2, Store,
 } from 'lucide-react';
 
 export default function Profile() {
   const { user } = useAuth();
   const { t, lang, setLang } = useI18n();
+  const { theme, setTheme } = useTheme();
   const { logoUrl, logoPath, shopName, saveLogo, resetLogo } = useBranding();
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [logoBusy, setLogoBusy] = useState(false);
@@ -249,6 +251,32 @@ export default function Profile() {
               size="sm"
               className="w-[130px]"
             />
+          </div>
+          <div className="mt-5 flex items-center justify-between gap-4 border-t border-border-light pt-5">
+            <div className="min-w-0">
+              <p className="text-[13px] font-medium text-text-primary">{t('theme.appearance')}</p>
+              <p className="text-[13px] text-text-muted">{t('theme.appearanceDesc')}</p>
+            </div>
+            <div role="radiogroup" aria-label={t('theme.appearance')} className="inline-flex rounded-[10px] border border-border p-0.5">
+              {([
+                { value: 'light', label: t('theme.light'), icon: <Sun size={14} /> },
+                { value: 'dark', label: t('theme.dark'), icon: <Moon size={14} /> },
+              ] as const).map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={theme === opt.value}
+                  onClick={() => setTheme(opt.value)}
+                  className={`inline-flex h-8 items-center gap-1.5 rounded-[8px] px-3 text-[13px] font-medium transition-colors ${
+                    theme === opt.value ? 'bg-navy text-white' : 'text-text-secondary hover:bg-[rgb(var(--ink)/0.06)]'
+                  }`}
+                >
+                  {opt.icon}
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </div>

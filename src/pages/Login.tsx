@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useAuth } from '../hooks/authContext';
 import { useI18n } from '../i18n';
 import { useBranding } from '../hooks/brandingContext';
+import ThemeToggle from '../components/ThemeToggle';
 import type { LoginResponse } from '../lib/types';
 import { Eye, EyeOff, User, Lock, ArrowRight, Loader2 } from 'lucide-react';
 
@@ -68,16 +69,17 @@ export default function Login() {
 
   return (
     <div
-      className="flex min-h-screen w-screen flex-col items-center justify-center gap-7 px-5 py-12"
+      className="relative flex min-h-screen w-screen flex-col items-center justify-center gap-7 px-5 py-12"
       style={{
-        backgroundColor: '#060a14',
+        backgroundColor: 'var(--color-surface)',
         backgroundImage:
-          'radial-gradient(900px 520px at 50% -120px, rgba(37,99,235,0.42), transparent 70%), radial-gradient(520px 340px at 85% 0, rgba(59,130,246,0.14), transparent 70%)',
+          'radial-gradient(900px 520px at 50% -120px, var(--glow-1), transparent 70%), radial-gradient(520px 340px at 85% 0, var(--glow-2), transparent 70%)',
       }}
     >
+      <ThemeToggle className="absolute end-5 top-5 bg-card/60" />
       {/* Wordmark */}
       <div className="animate-fade-up flex flex-col items-center gap-3 text-center">
-        <span className="flex h-14 w-14 items-center justify-center rounded-[16px] bg-[#faf8fd] p-2">
+        <span className="flex h-14 w-14 items-center justify-center rounded-[16px] bg-[#faf8fd] p-2 ring-1 ring-border-light">
           <img src={logoUrl} alt="" className="h-full w-full object-contain" />
         </span>
         <span dir="auto" className="text-[40px] font-semibold leading-[44px] tracking-[-0.05em] text-text-primary">
@@ -89,7 +91,7 @@ export default function Login() {
       <form
         onSubmit={handleSubmit}
         className="animate-fade-up flex w-full max-w-[400px] flex-col gap-5 rounded-[20px] border border-border bg-card p-8"
-        style={{ boxShadow: 'inset 0 1px 0 rgba(250,248,253,0.06), var(--shadow-raised)' }}
+        style={{ boxShadow: 'inset 0 1px 0 rgb(var(--ink) / 0.06), var(--shadow-raised)' }}
       >
         <div className="flex flex-col gap-1.5">
           <h1 className="text-[28px] font-semibold leading-8 tracking-[-0.03em] text-text-primary">
@@ -102,7 +104,7 @@ export default function Login() {
 
         {error && (
           <div role="alert" className="flex items-start gap-2.5 rounded-[10px] bg-[rgba(255,77,106,0.14)] px-3.5 py-3 text-[13px] font-medium text-accent-red">
-            <span className="mt-px flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-[#ff4d6a] text-[10px] font-bold text-[#060a14]">!</span>
+            <span className="mt-px flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-[var(--danger-fill)] text-[10px] font-bold text-[color:var(--danger-ink)]">!</span>
             <span>{error}</span>
           </div>
         )}
@@ -173,7 +175,7 @@ export default function Login() {
         <p className="text-center text-[12px] leading-[18px] text-text-muted">{t('login.footerHint')}</p>
       </form>
 
-      <div className="flex h-8 items-center gap-2 rounded-full border border-border-light bg-[rgba(13,19,34,0.8)] px-3.5 text-[12px] text-text-secondary">
+      <div className="flex h-8 items-center gap-2 rounded-full border border-border-light bg-sidebar/80 px-3.5 text-[12px] text-text-secondary">
         <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-accent-green" />
         {t('login.systemReady')}
       </div>
