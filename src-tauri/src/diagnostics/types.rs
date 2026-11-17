@@ -180,6 +180,10 @@ pub struct FullDeviceDiagnosticReport {
     pub security_locks: SecurityLockStatus,
     pub hardware_tests: HashMap<String, HardwareTestResult>,
     pub grading: GradingResult,
+    /// Set when only basic details could be read (e.g. "mtp": an Android phone
+    /// with USB debugging off). Everything not read is left unknown.
+    #[serde(default)]
+    pub limited_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

@@ -25,6 +25,7 @@ pub async fn inspect_device_locks(
     device_id: String,
     platform: Option<String>,
 ) -> Result<PreWipeAuditResult, String> {
+    crate::transfer::mtp::require_debugging(&device_id)?;
     let inspector = crate::wipe::LockInspector::new();
     inspector
         .inspect_device(&device_id, platform.as_deref())
@@ -36,6 +37,7 @@ pub async fn launch_account_removal_screen(
     device_id: String,
     platform: String,
 ) -> Result<String, String> {
+    crate::transfer::mtp::require_debugging(&device_id)?;
     let inspector = crate::wipe::LockInspector::new();
     inspector
         .launch_account_removal_screen(&device_id, &platform)
@@ -48,6 +50,7 @@ pub async fn execute_wipe(
     state: State<'_, WipeState>,
     req: ExecuteWipeRequest,
 ) -> Result<SanitizationRecord, String> {
+    crate::transfer::mtp::require_debugging(&req.device_id)?;
     state.engine.execute_wipe(Some(&app), req).await
 }
 

@@ -36,6 +36,9 @@ pub enum DeviceConnectionState {
     Offline,
     Locked,
     NeedTrust,
+    /// Android phone seen only as a file-transfer (MTP) device: make, model,
+    /// serial and storage can be read, but USB debugging is off so nothing else.
+    MtpOnly,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

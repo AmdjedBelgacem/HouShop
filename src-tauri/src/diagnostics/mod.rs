@@ -2,6 +2,7 @@ pub mod android_probe;
 pub mod diagnostic_server;
 pub mod grading;
 pub mod ios_probe;
+pub mod mtp_probe;
 pub mod parts_audit;
 pub mod types;
 pub mod virtual_probe;
@@ -42,6 +43,11 @@ impl DiagnosticEngine {
         // 1. Check if it is a demo/virtual device
         if device_id.starts_with("demo-") || device_id.starts_with("mock-") {
             return Ok(virtual_probe::generate_virtual_report(device_id));
+        }
+
+        // 1b. An Android phone seen only as a file-transfer (MTP) device.
+        if device_id.starts_with(crate::transfer::mtp::ID_PREFIX) {
+            return mtp_probe::probe_device(device_id).await;
         }
 
         // 2. Check if platform is specified or deduce from device_id

@@ -1,0 +1,9 @@
+{
+  "bundle": {
+    "resources": {
+      "resources/macos/platform-tools/": "platform-tools/",
+      "resources/macos/imobiledevice/": "imobiledevice/",
+      "resources/macos/mtp/": "mtp/"
+    }
+  }
+}

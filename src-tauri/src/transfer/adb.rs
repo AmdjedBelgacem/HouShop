@@ -17,11 +17,12 @@ impl AdbManager {
     }
 
     pub fn is_available(&self) -> bool {
-        locate_adb().is_some()
+        crate::tools::is_available("adb")
     }
 
     /// Executes `adb devices -l` and returns parsed connected Android devices.
     pub async fn list_devices(&self) -> Result<Vec<DeviceInfo>, String> {
+        crate::tools::ensure_adb_server().await;
         let output = adb_command()
             .args(["devices", "-l"])
             .output()
@@ -44,7 +45,8 @@ impl AdbManager {
 
         for line in text.lines() {
             let line = line.trim();
-            if line.is_empty() || line.starts_with("List of devices") {
+            // Skip the header and adb's own status lines ("* daemon started ...").
+            if line.is_empty() || line.starts_with("List of devices") || line.starts_with('*') || line.starts_with("adb server") {
                 continue;
             }
 
@@ -565,98 +567,12 @@ fn parse_df_output(output: &str) -> Option<(u64, u64)> {
     None
 }
 
-/// File name of the adb executable on this platform.
-#[cfg(windows)]
-const ADB_FILE: &str = "adb.exe";
-#[cfg(not(windows))]
-const ADB_FILE: &str = "adb";
-
-/// Every place adb is commonly found, best first. Windows shops rarely have
-/// adb on PATH, so the usual install locations are all checked.
-fn adb_candidates() -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = Vec::new();
-    let mut push = |p: PathBuf| out.push(p);
-
-    // 1. An explicit override, then adb shipped next to the app.
-    if let Some(p) = std::env::var_os("ADB_PATH") {
-        push(PathBuf::from(p));
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            for sub in ["", "platform-tools", "resources/platform-tools", "resources", "../Resources/platform-tools", "../Resources"] {
-                push(dir.join(sub).join(ADB_FILE));
-            }
-        }
-    }
-    for rel in ["./", "./platform-tools/", "../platform-tools/"] {
-        push(PathBuf::from(format!("{rel}{ADB_FILE}")));
-    }
-
-    // 2. Android SDK locations.
-    for var in ["ANDROID_HOME", "ANDROID_SDK_ROOT", "ANDROID_SDK"] {
-        if let Some(root) = std::env::var_os(var) {
-            push(PathBuf::from(root).join("platform-tools").join(ADB_FILE));
-        }
-    }
-    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
-        push(PathBuf::from(local).join("Android/Sdk/platform-tools").join(ADB_FILE));
-    }
-    if let Some(home) = std::env::var_os("HOME") {
-        push(PathBuf::from(home).join("Library/Android/sdk/platform-tools").join(ADB_FILE));
-    }
-
-    // 3. Where people unpack or install platform-tools by hand (Windows).
-    if let Some(profile) = std::env::var_os("USERPROFILE") {
-        let profile = PathBuf::from(profile);
-        for sub in [
-            "platform-tools",
-            "Downloads/platform-tools",
-            "Desktop/platform-tools",
-            "Documents/platform-tools",
-            "adb",
-            "scoop/shims",
-            "scoop/apps/adb/current/platform-tools",
-        ] {
-            push(profile.join(sub).join(ADB_FILE));
-        }
-    }
-    for root in ["C:/platform-tools", "C:/adb", "C:/Android/platform-tools", "C:/Android/sdk/platform-tools",
-                 "C:/Program Files/platform-tools", "C:/Program Files (x86)/Android/android-sdk/platform-tools",
-                 "C:/ProgramData/chocolatey/bin"] {
-        push(PathBuf::from(root).join(ADB_FILE));
-    }
-
-    // 4. Homebrew and other Unix locations.
-    for p in ["/opt/homebrew/bin/adb", "/usr/local/bin/adb", "/usr/bin/adb"] {
-        push(PathBuf::from(p));
-    }
-
-    // 5. Every folder on PATH.
-    if let Some(path) = std::env::var_os("PATH") {
-        for dir in std::env::split_paths(&path) {
-            push(dir.join(ADB_FILE));
-        }
-    }
-    out
-}
-
 /// Full path of the adb executable, or None when it is not installed.
-/// Looked up on every call (a few file checks) so installing adb while the
-/// app is open takes effect without a restart.
 pub fn locate_adb() -> Option<PathBuf> {
-    adb_candidates().into_iter().find(|p| p.is_file())
+    crate::tools::locate("adb")
 }
 
-/// A ready-to-use `adb` command. Falls back to plain `adb` (resolved by the
-/// OS) when no install is found, and never flashes a console window on Windows.
+/// A ready-to-use `adb` command (bundled copy first).
 pub fn adb_command() -> Command {
-    #[allow(unused_mut)]
-    let mut cmd = Command::new(locate_adb().unwrap_or_else(|| PathBuf::from(ADB_FILE)));
-    #[cfg(windows)]
-    {
-        // CREATE_NO_WINDOW: the device poller runs adb every two seconds.
-        cmd.creation_flags(0x0800_0000);
-    }
-    cmd
+    crate::tools::command("adb")
 }
-

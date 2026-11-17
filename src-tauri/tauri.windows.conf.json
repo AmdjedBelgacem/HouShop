@@ -1,7 +1,8 @@
 {
   "bundle": {
     "resources": {
-      "resources/platform-tools/": "platform-tools/"
+      "resources/windows/platform-tools/": "platform-tools/",
+      "resources/windows/imobiledevice/": "imobiledevice/"
     }
   }
 }

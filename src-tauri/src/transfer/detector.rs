@@ -52,6 +52,16 @@ impl DeviceDetector {
             all_devices.extend(adb_devices);
         }
 
+        // 1b. Android phones that only offer file transfer (USB debugging off).
+        let known_serials: Vec<String> = all_devices.iter().map(|d| d.id.to_lowercase()).collect();
+        for m in super::mtp::list_devices().await {
+            let serial = m.serial.clone().unwrap_or_default().to_lowercase();
+            if !serial.is_empty() && known_serials.contains(&serial) {
+                continue; // already listed through adb
+            }
+            all_devices.push(mtp_device_info(&m));
+        }
+
         // 2. iOS devices
         if let Ok(ios_devices) = self.ios.list_devices().await {
             all_devices.extend(ios_devices);
@@ -140,5 +150,28 @@ mod tests {
         for d in &devices {
             println!("DEVICE: id={}, name={}, model={}, brand={}, platform={:?}, state={:?}", d.id, d.name, d.model, d.brand, d.platform, d.connection_state);
         }
+    }
+}
+
+/// How a phone that only offers file transfer appears in the device list.
+pub fn mtp_device_info(m: &super::mtp::MtpDevice) -> DeviceInfo {
+    use super::types::{ConnectionType, DeviceCapabilities, DeviceConnectionState, DevicePlatform};
+    let brand = if m.manufacturer.is_empty() { "Android".to_string() } else { m.manufacturer.clone() };
+    let model = m.model.clone();
+    DeviceInfo {
+        id: m.id.clone(),
+        name: format!("{} {}", brand, model).trim().to_string(),
+        brand,
+        model,
+        platform: DevicePlatform::Android,
+        os_version: "Android".to_string(),
+        connection_type: ConnectionType::Usb,
+        connection_state: DeviceConnectionState::MtpOnly,
+        battery_level: m.battery_percent,
+        is_charging: None,
+        storage_total_bytes: m.storage_total_bytes,
+        storage_free_bytes: m.storage_free_bytes,
+        capabilities: DeviceCapabilities::default(),
+        is_virtual: false,
     }
 }

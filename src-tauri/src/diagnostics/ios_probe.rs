@@ -8,21 +8,15 @@ use base64::Engine;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
-use tokio::process::Command;
 
 pub struct IosProbe {
-    ideviceinfo_path: PathBuf,
     idevicediagnostics_path: Option<PathBuf>,
 }
 
 impl IosProbe {
     pub fn new() -> Self {
-        let ideviceinfo_path =
-            resolve_tool("ideviceinfo").unwrap_or_else(|| PathBuf::from("ideviceinfo"));
-        let idevicediagnostics_path = resolve_tool("idevicediagnostics");
         Self {
-            ideviceinfo_path,
-            idevicediagnostics_path,
+            idevicediagnostics_path: crate::tools::locate("idevicediagnostics"),
         }
     }
 
@@ -59,10 +53,10 @@ impl IosProbe {
     /// Reads the battery gauge straight from the phone's registry
     /// (`idevicediagnostics ioregentry AppleSmartBattery`).
     async fn query_battery_registers(&self, udid: &str) -> BatteryRegisters {
-        let Some(tool) = &self.idevicediagnostics_path else {
+        let Some(_) = &self.idevicediagnostics_path else {
             return BatteryRegisters::default();
         };
-        let mut cmd = Command::new(tool);
+        let mut cmd = crate::tools::command("idevicediagnostics");
         if !udid.is_empty() {
             cmd.arg("-u").arg(udid);
         }
@@ -79,7 +73,7 @@ impl IosProbe {
         udid: &str,
         domain: Option<&str>,
     ) -> Result<(HashMap<String, String>, String), String> {
-        let mut cmd = Command::new(&self.ideviceinfo_path);
+        let mut cmd = crate::tools::command("ideviceinfo");
         if !udid.is_empty() {
             cmd.arg("-u").arg(udid);
         }
@@ -295,6 +289,7 @@ impl IosProbe {
             security_locks,
             hardware_tests,
             grading,
+            limited_reason: None,
         })
     }
 }
@@ -506,41 +501,6 @@ fn estimate_ios_ram(product_type: &str) -> f32 {
     } else {
         4.0
     }
-}
-
-fn resolve_tool(name: &str) -> Option<PathBuf> {
-    let candidate = PathBuf::from(name);
-    if is_tool_executable(&candidate) {
-        return Some(candidate);
-    }
-
-    let search_paths = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"];
-
-    for dir in &search_paths {
-        let p = PathBuf::from(dir).join(name);
-        if is_tool_executable(&p) {
-            return Some(p);
-        }
-    }
-
-    None
-}
-
-fn is_tool_executable(path: &PathBuf) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(metadata) = std::fs::metadata(path) {
-            return metadata.is_file() && (metadata.permissions().mode() & 0o111 != 0);
-        }
-    }
-    #[cfg(windows)]
-    {
-        if path.exists() {
-            return true;
-        }
-    }
-    false
 }
 
 #[cfg(test)]

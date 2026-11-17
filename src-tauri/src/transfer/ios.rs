@@ -8,27 +8,15 @@ use tokio::process::Command;
 
 pub struct IosManager {
     tools_available: bool,
-    idevice_id_path: PathBuf,
-    idevicepair_path: PathBuf,
-    ideviceinfo_path: PathBuf,
     /// Reads the phone's media folders over USB (read-only use only).
     afcclient_path: Option<PathBuf>,
 }
 
 impl IosManager {
     pub fn new() -> Self {
-        let idevice_id_path = resolve_tool("idevice_id").unwrap_or_else(|| PathBuf::from("idevice_id"));
-        let idevicepair_path = resolve_tool("idevicepair").unwrap_or_else(|| PathBuf::from("idevicepair"));
-        let ideviceinfo_path = resolve_tool("ideviceinfo").unwrap_or_else(|| PathBuf::from("ideviceinfo"));
-
-        let tools_available = is_tool_executable(&idevice_id_path) || is_tool_executable(&ideviceinfo_path);
-        let afcclient_path = resolve_tool("afcclient");
         Self {
-            tools_available,
-            idevice_id_path,
-            idevicepair_path,
-            ideviceinfo_path,
-            afcclient_path,
+            tools_available: crate::tools::is_available("idevice_id") || crate::tools::is_available("ideviceinfo"),
+            afcclient_path: crate::tools::locate("afcclient"),
         }
     }
 
@@ -42,7 +30,7 @@ impl IosManager {
             return Ok(Vec::new());
         }
 
-        let output = Command::new(&self.idevice_id_path)
+        let output = crate::tools::command("idevice_id")
             .arg("-l")
             .output()
             .await
@@ -62,7 +50,7 @@ impl IosManager {
             }
 
             // Check pairing status: `idevicepair -u <udid> validate`
-            let pair_status = Command::new(&self.idevicepair_path)
+            let pair_status = crate::tools::command("idevicepair")
                 .args(["-u", udid, "validate"])
                 .output()
                 .await;
@@ -86,7 +74,7 @@ impl IosManager {
             let mut storage_total: u64 = 0;
             let mut storage_free: u64 = 0;
 
-            if let Ok(info_out) = Command::new(&self.ideviceinfo_path).args(["-u", udid]).output().await {
+            if let Ok(info_out) = crate::tools::command("ideviceinfo").args(["-u", udid]).output().await {
                 if info_out.status.success() {
                     let info_text = String::from_utf8_lossy(&info_out.stdout);
                     for infoline in info_text.lines() {
@@ -105,7 +93,7 @@ impl IosManager {
             }
 
             // Storage lives in the disk-usage section, not the default one.
-            if let Ok(disk_out) = Command::new(&self.ideviceinfo_path)
+            if let Ok(disk_out) = crate::tools::command("ideviceinfo")
                 .args(["-u", udid, "-q", "com.apple.disk_usage"])
                 .output()
                 .await
@@ -118,7 +106,7 @@ impl IosManager {
             }
 
             // Query battery if available
-            if let Ok(bat_out) = Command::new(&self.ideviceinfo_path).args(["-u", udid, "-q", "com.apple.mobile.battery"]).output().await {
+            if let Ok(bat_out) = crate::tools::command("ideviceinfo").args(["-u", udid, "-q", "com.apple.mobile.battery"]).output().await {
                 if bat_out.status.success() {
                     let bat_text = String::from_utf8_lossy(&bat_out.stdout);
                     for bline in bat_text.lines() {
@@ -369,46 +357,6 @@ fn map_product_type_to_model(pt: &str) -> String {
         _ if pt.starts_with("iPad") => format!("Apple {}", pt),
         _ => pt.to_string(),
     }
-}
-
-fn which(cmd: &str) -> bool {
-    std::process::Command::new(cmd)
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-fn resolve_tool(cmd: &str) -> Option<PathBuf> {
-    for candidate in [
-        PathBuf::from(format!("/opt/homebrew/bin/{}", cmd)),
-        PathBuf::from(format!("/usr/local/bin/{}", cmd)),
-    ] {
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-
-    if which(cmd) {
-        return Some(PathBuf::from(cmd));
-    }
-
-    None
-}
-
-fn is_tool_executable(path: &PathBuf) -> bool {
-    if path.is_file() {
-        return true;
-    }
-    std::process::Command::new(path)
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
 }
 
 #[cfg(test)]

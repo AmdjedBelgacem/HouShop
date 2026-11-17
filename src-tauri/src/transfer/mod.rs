@@ -5,6 +5,9 @@ pub mod detector;
 pub mod engine;
 pub mod harmony;
 pub mod ios;
+pub mod mtp;
+#[cfg(windows)]
+pub mod mtp_wpd;
 pub mod normalizer;
 pub mod pipeline;
 pub mod types;

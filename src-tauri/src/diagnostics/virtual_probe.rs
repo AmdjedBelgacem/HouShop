@@ -120,6 +120,7 @@ fn generate_iphone_15_pro() -> FullDeviceDiagnosticReport {
         security_locks,
         hardware_tests,
         grading,
+        limited_reason: None,
     }
 }
 
@@ -220,6 +221,7 @@ fn generate_galaxy_s24_ultra() -> FullDeviceDiagnosticReport {
         security_locks,
         hardware_tests,
         grading,
+        limited_reason: None,
     }
 }
 
@@ -329,6 +331,7 @@ fn generate_huawei_p60_pro() -> FullDeviceDiagnosticReport {
         security_locks,
         hardware_tests,
         grading,
+        limited_reason: None,
     }
 }
 
@@ -442,5 +445,6 @@ fn generate_defective_iphone() -> FullDeviceDiagnosticReport {
         security_locks,
         hardware_tests,
         grading,
+        limited_reason: None,
     }
 }

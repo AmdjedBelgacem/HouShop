@@ -1,4 +1,3 @@
-use tokio::process::Command;
 
 pub struct OobeVerifier;
 
@@ -23,7 +22,7 @@ impl OobeVerifier {
     }
 
     async fn verify_ios_oobe(&self, udid: &str) -> bool {
-        let output = Command::new("ideviceinfo")
+        let output = crate::tools::command("ideviceinfo")
             .args(["-u", udid, "-k", "ActivationState"])
             .output()
             .await;

@@ -1,6 +1,5 @@
 use super::types::{ActiveAccountInfo, PreWipeAuditResult, WipeMethodInfo, WipeRiskLevel};
 use std::collections::HashMap;
-use tokio::process::Command;
 
 pub struct LockInspector;
 
@@ -76,7 +75,7 @@ impl LockInspector {
 
     /// Inspect iOS device via ideviceinfo and lockdownd
     async fn inspect_ios(&self, udid: &str) -> Result<PreWipeAuditResult, String> {
-        let output = Command::new("ideviceinfo")
+        let output = crate::tools::command("ideviceinfo")
             .args(["-u", udid])
             .output()
             .await
@@ -109,7 +108,7 @@ impl LockInspector {
 
         // Battery percentage
         let battery_level = {
-            let batt_out = Command::new("ideviceinfo")
+            let batt_out = crate::tools::command("ideviceinfo")
                 .args(["-u", udid, "-q", "com.apple.mobile.battery"])
                 .output()
                 .await
@@ -132,7 +131,7 @@ impl LockInspector {
         let mut mdm_enrolled = false;
 
         // Check lockdownd keys
-        let fmi_out = Command::new("ideviceinfo")
+        let fmi_out = crate::tools::command("ideviceinfo")
             .args(["-u", udid, "-q", "com.apple.mobile.fmip"])
             .output()
             .await
@@ -168,7 +167,7 @@ impl LockInspector {
         }
 
         // Check MDM management
-        let mdm_out = Command::new("ideviceinfo")
+        let mdm_out = crate::tools::command("ideviceinfo")
             .args(["-u", udid, "-q", "com.apple.mobile.restriction"])
             .output()
             .await

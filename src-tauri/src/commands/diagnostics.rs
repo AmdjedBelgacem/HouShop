@@ -63,6 +63,7 @@ pub async fn launch_mobile_companion_on_device(
     platform: String,
     connect_url: String,
 ) -> Result<String, String> {
+    crate::transfer::mtp::require_debugging(&device_id)?;
     if platform.to_lowercase() == "android" {
         let output = crate::transfer::adb::adb_command()
             .args([

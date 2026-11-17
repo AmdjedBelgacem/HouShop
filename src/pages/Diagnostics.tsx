@@ -747,6 +747,16 @@ export default function Diagnostics() {
         </>
       )}
 
+      {report?.limited_reason === 'mtp' && (
+        <div
+          role="status"
+          className="rounded-2xl border border-accent-orange/30 bg-accent-orange/10 px-4 py-3.5 text-[13px] text-text-secondary"
+        >
+          <p className="font-semibold text-text-primary">{t('diag.mtp.title')}</p>
+          <p className="mt-1">{t('diag.mtp.body')}</p>
+        </div>
+      )}
+
       {report ? (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Left Column: Device Identity & Specifications (4 cols) */}

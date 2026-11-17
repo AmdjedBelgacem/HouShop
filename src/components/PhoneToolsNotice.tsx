@@ -1,11 +1,19 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { invoke } from '@tauri-apps/api/core';
-import { Wrench, RefreshCw } from 'lucide-react';
+import { Wrench, RefreshCw, Stethoscope, X } from 'lucide-react';
 import { useI18n } from '../i18n';
 
 interface PhoneToolStatus {
   adb: boolean;
   ios: boolean;
+}
+
+interface ConnectionReport {
+  adb_devices: [string, string][];
+  ios_devices: string[];
+  usb: { name: string; vendor_id: string; driver_ok: boolean; phone_like: boolean }[];
+  hints: { code: string; detail: string }[];
 }
 
 /**
@@ -22,10 +30,67 @@ export default function PhoneToolsNotice() {
     refetchOnWindowFocus: true,
   });
 
-  if (!data || (data.adb && data.ios)) return null;
+  const [report, setReport] = useState<ConnectionReport | null>(null);
+  const [checking, setChecking] = useState(false);
+  const runCheck = async () => {
+    setChecking(true);
+    try {
+      setReport(await invoke<ConnectionReport>('get_phone_connection_report'));
+    } catch {
+      setReport({ adb_devices: [], ios_devices: [], usb: [], hints: [] });
+    } finally {
+      setChecking(false);
+    }
+  };
   const onWindows = /win/i.test(navigator.platform);
+  const toolsMissing = !!data && !(data.adb && data.ios);
+
+  const checkBlock = (
+    <div className="space-y-2">
+      {!report ? (
+        <button type="button" onClick={runCheck} disabled={checking} className="btn-ghost px-2 py-1 text-[13px] font-semibold text-navy">
+          <Stethoscope size={13} className={checking ? 'animate-pulse' : ''} /> {checking ? t('diag.check.running') : t('diag.check.button')}
+        </button>
+      ) : (
+        <div role="status" className="rounded-2xl border border-border bg-surface px-4 py-3.5 text-[13px] text-text-secondary space-y-2">
+          <div className="flex items-start justify-between gap-3">
+            <p className="font-semibold text-text-primary">{t('diag.check.title')}</p>
+            <button type="button" onClick={() => setReport(null)} aria-label={t('diag.check.close')} className="btn-ghost p-1">
+              <X size={13} />
+            </button>
+          </div>
+          <p>
+            {t('diag.check.seen', {
+              n: report.adb_devices.filter(([, st]) => st === 'device').length,
+              m: report.ios_devices.length,
+            })}
+          </p>
+          {report.usb.some((u) => u.phone_like) && (
+            <p className="text-text-muted">
+              {t('diag.check.usbSeen', { list: report.usb.filter((u) => u.phone_like).map((u) => u.name).join(', ') })}
+            </p>
+          )}
+          {report.hints.length === 0 ? (
+            <p>{t('diag.check.allGood')}</p>
+          ) : (
+            <ul className="list-disc space-y-1 ps-5">
+              {report.hints.map((h, i) => (
+                <li key={i}>{t(`diag.hint.${h.code}`, { detail: h.detail })}</li>
+              ))}
+            </ul>
+          )}
+          <button type="button" onClick={runCheck} disabled={checking} className="btn-ghost px-2 py-1 text-[13px] font-semibold text-navy">
+            <RefreshCw size={13} className={checking ? 'animate-spin' : ''} /> {t('diag.tools.recheck')}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  if (!toolsMissing) return checkBlock;
 
   return (
+    <>
     <div
       role="status"
       className="rounded-2xl border border-accent-orange/30 bg-accent-orange/10 px-4 py-3.5 text-[13px] text-text-secondary"
@@ -77,5 +142,7 @@ export default function PhoneToolsNotice() {
         </button>
       </div>
     </div>
+    {checkBlock}
+    </>
   );
 }

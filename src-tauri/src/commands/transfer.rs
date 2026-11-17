@@ -71,6 +71,7 @@ pub async fn scan_device_data(
     device_id: String,
     detector: State<'_, Arc<DeviceDetector>>,
 ) -> Result<DeviceDataSummary, String> {
+    crate::transfer::mtp::require_debugging(&device_id)?;
     let device = detector
         .get_device(&device_id)
         .await
@@ -113,6 +114,8 @@ pub async fn start_phone_transfer(
     req: StartTransferRequest,
     engine: State<'_, Arc<TransferEngine>>,
 ) -> Result<TransferSessionRecord, String> {
+    crate::transfer::mtp::require_debugging(&req.source_device_id)?;
+    crate::transfer::mtp::require_debugging(&req.target_device_id)?;
     engine.start_transfer(app, req).await
 }
 
@@ -289,4 +292,11 @@ pub async fn get_wifi_transfer_server_info(
 ) -> Result<Option<WifiServerInfo>, String> {
     let mgr = wifi_mgr.lock().await;
     Ok(mgr.get_info())
+}
+
+/// What the computer can see about connected phones, with plain-language hints
+/// for why one might be missing.
+#[tauri::command]
+pub async fn get_phone_connection_report() -> crate::connection_report::ConnectionReport {
+    crate::connection_report::collect().await
 }

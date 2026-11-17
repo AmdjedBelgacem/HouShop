@@ -103,6 +103,7 @@ impl AndroidProbe {
             security_locks,
             hardware_tests,
             grading,
+            limited_reason: None,
         })
     }
 
@@ -310,6 +311,9 @@ impl AndroidProbe {
     }
 
     async fn exec_adb(&self, serial: &str, args: &[&str]) -> Result<String, String> {
+        if self.adb_path.is_none() {
+            crate::tools::ensure_adb_server().await;
+        }
         let mut cmd = match &self.adb_path {
             Some(p) => Command::new(p),
             None => crate::transfer::adb::adb_command(),

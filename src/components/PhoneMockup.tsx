@@ -271,6 +271,17 @@ export default function PhoneMockup({
                   </div>
                 </div>
               </div>
+            ) : device.connection_state === 'mtp_only' ? (
+              /* ANDROID SEEN AS FILE-TRANSFER ONLY (USB DEBUGGING OFF) */
+              <div className="flex-1 flex flex-col items-center justify-center text-center space-y-3">
+                <div className="p-4 rounded-2xl bg-white/15 backdrop-blur-md border border-white/25 shadow-2xl text-center space-y-2">
+                  <div className="w-10 h-10 rounded-full bg-accent-orange/20 text-amber-300 mx-auto flex items-center justify-center">
+                    <AlertTriangle size={20} />
+                  </div>
+                  <h4 className="text-[13px] font-bold text-white">{device.brand} {device.model}</h4>
+                  <p className="text-[13px] text-white/80 leading-snug">{t('diag.phone.mtpDesc')}</p>
+                </div>
+              </div>
             ) : device.connection_state === 'unauthorized' ? (
               /* ANDROID USB DEBUGGING PROMPT MOCKUP */
               <div className="flex-1 flex flex-col items-center justify-center text-center space-y-3">

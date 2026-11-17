@@ -356,7 +356,7 @@ export interface ReservationStats {
 
 export type DevicePlatform = 'android' | 'ios' | 'harmonyos';
 export type ConnectionType = 'usb' | 'wifi' | 'virtual';
-export type DeviceConnectionState = 'connected' | 'unauthorized' | 'offline' | 'locked' | 'need_trust';
+export type DeviceConnectionState = 'connected' | 'unauthorized' | 'offline' | 'locked' | 'need_trust' | 'mtp_only';
 
 export type TransferCategory =
   | 'contacts'
@@ -607,6 +607,8 @@ export interface FullDeviceDiagnosticReport {
   security_locks: SecurityLockStatus;
   hardware_tests: Record<string, HardwareTestResult>;
   grading: GradingResult;
+  /** 'mtp' when only basic details could be read (USB debugging is off). */
+  limited_reason?: string | null;
 }
 
 export interface DeviceInspectionRecord {

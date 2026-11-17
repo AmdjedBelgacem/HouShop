@@ -1,8 +1,10 @@
 mod commands;
+mod connection_report;
 mod db;
 mod diagnostics;
 mod models;
 mod session;
+mod tools;
 mod transfer;
 mod wipe;
 use std::sync::Arc;
@@ -117,6 +119,7 @@ pub fn run() {
             commands::printer::print_label,
             commands::printer::print_label_tspl,
             commands::transfer::get_phone_tool_status,
+            commands::transfer::get_phone_connection_report,
             commands::transfer::list_transfer_devices,
             commands::transfer::refresh_transfer_devices,
             commands::transfer::enable_virtual_devices,
@@ -160,8 +163,13 @@ pub fn run() {
             get_app_shop_name,
             clear_app_shop_name,
             ]))
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                tools::stop_adb_server();
+            }
+        });
 }
 
 /// Update the OS window / taskbar title from the shop name.
